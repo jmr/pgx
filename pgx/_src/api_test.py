@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import os
+import tempfile
 from typing import get_args
 
 import jax
@@ -82,12 +83,10 @@ def api_test_single(env: Env, num: int = 100, use_key=True):
                 break
 
     # check visualization
-    filename = "/tmp/tmp.svg"
+    fd, filename = tempfile.mkstemp(suffix=".svg")
+    os.close(fd)
     state.save_svg(filename)
-    try:
-        os.remove(filename)
-    except FileNotFoundError:
-        pass
+    os.remove(filename)
 
 
 def api_test_batch(env: Env, num: int = 100, use_key=True):
@@ -113,12 +112,10 @@ def api_test_batch(env: Env, num: int = 100, use_key=True):
             state = step(state, action, keys)
 
     # check visualization
-    filename = "/tmp/tmp.svg"
+    fd, filename = tempfile.mkstemp(suffix=".svg")
+    os.close(fd)
     state.save_svg(filename)
-    try:
-        os.remove(filename)
-    except FileNotFoundError:
-        pass
+    os.remove(filename)
 
 
 def _validate_init_reward(state: State):

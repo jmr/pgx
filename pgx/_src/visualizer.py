@@ -612,6 +612,23 @@ class Visualizer:
                     "silver",
                     "black",
                 )
+        elif _state.env_id == "jass":
+            from pgx._src.dwg.jass import _make_jass_dwg
+
+            self.config["GRID_SIZE"] = 30
+            self.config["BOARD_WIDTH"] = 14
+            self.config["BOARD_HEIGHT"] = 14
+            self._make_dwg_group = _make_jass_dwg  # type:ignore
+            if (self.config["COLOR_THEME"] is None and self.config["COLOR_THEME"] == "dark") or self.config[
+                "COLOR_THEME"
+            ] == "dark":
+                self.config["COLOR_SET"] = ColorSet(
+                    "lightgray", "dimgray", "#404040", "gray", "#1e1e1e", "darkgray", "whitesmoke"
+                )
+            else:
+                self.config["COLOR_SET"] = ColorSet(
+                    "black", "white", "black", "black", "white", "black", ""
+                )
         elif _state.env_id == "tic_tac_toe":
             from pgx._src.dwg.tictactoe import _make_tictactoe_dwg
 

@@ -57,6 +57,7 @@ EnvId = Literal[
     "minatar-freeway",
     "minatar-seaquest",
     "minatar-space_invaders",
+    "jass",
     "othello",
     "shogi",
     "sparrow_mahjong",
@@ -417,6 +418,10 @@ def make(env_id: EnvId):  # noqa: C901
         from pgx.sparrow_mahjong import SparrowMahjong
 
         return SparrowMahjong()
+    elif env_id == "jass":
+        from pgx.jass import Jass
+
+        return Jass()
     elif env_id == "tic_tac_toe":
         from pgx.tic_tac_toe import TicTacToe
 

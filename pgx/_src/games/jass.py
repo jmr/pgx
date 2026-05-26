@@ -153,6 +153,98 @@ class Game:
 # ──────────────────────────────────────────────────────────────────────────────
 # Trump selection
 
+def value_features(state: GameState, player: Array) -> tuple[Array, Array]:
+    """Build value-network features from a fully-observed (determinized) game state.
+
+    Returns:
+        card_matrix : (36, 12) bool — one row per card, columns below.
+        header      : (20,)  bool — scalar context.
+
+    Card matrix columns (player-relative: me / partner / left-opp / right-opp):
+        0  : I hold the card
+        1  : partner holds it
+        2  : left opponent holds it
+        3  : right opponent holds it
+        4  : my team has collected it
+        5  : opponent team has collected it
+        6  : card is currently in the trick
+        7  : I played it in the current trick
+        8  : partner played it
+        9  : left opponent played it
+        10 : right opponent played it
+        11 : card is trump in the current mode
+
+    Player-relative seat offsets: me=0, left-opp=1, partner=2, right-opp=3.
+    Columns 0&7 / 1&8 / 2&9 / 3&10 always refer to the same player.
+
+    Header:
+        [0:6]   trump mode one-hot (♦ ♥ ♠ ♣ Obenabe Undeufe)
+        [6]     forehand_passed
+        [7:16]  trick_num one-hot (0–8)
+        [16:20] trick_leader one-hot (players 0–3)
+    """
+    partner   = (player + 2) % 4
+    left_opp  = (player + 1) % 4
+    right_opp = (player + 3) % 4
+
+    # ── Columns 0–3: who holds each card ──
+    col0 = state.hands[player]     # (36,)
+    col1 = state.hands[partner]
+    col2 = state.hands[left_opp]
+    col3 = state.hands[right_opp]
+
+    # ── Columns 4–5: team collection ──
+    col4 = state.cards_collected[player]   | state.cards_collected[partner]    # (36,)
+    col5 = state.cards_collected[left_opp] | state.cards_collected[right_opp]
+
+    # ── Columns 6–10: current trick ──
+    valid = state.trick_cards >= 0                                    # (4,)
+    safe  = jnp.where(valid, state.trick_cards, 0)                    # (4,)
+    col6  = jnp.zeros(36, dtype=jnp.bool_).at[safe].max(valid)       # (36,)
+
+    def _played_by(seat_offset: int) -> Array:
+        """(36,) mask: True at the card played by the player at relative seat_offset."""
+        p      = (player + seat_offset) % 4
+        c      = state.trick_cards[p]
+        played = (c >= 0) & valid[p]
+        safe_c = jnp.where(played, c, 0)
+        return jnp.zeros(36, dtype=jnp.bool_).at[safe_c].max(played)
+
+    col7  = _played_by(0)   # me
+    col8  = _played_by(2)   # partner
+    col9  = _played_by(1)   # left opponent
+    col10 = _played_by(3)   # right opponent
+
+    # ── Column 11: is trump ──
+    is_trump_mode = (state.trump >= 0) & (state.trump < 4)
+    trump_suit    = jnp.clip(state.trump, 0, 3)
+    col11 = is_trump_mode & (CARD_SUIT == trump_suit)                 # (36,)
+
+    card_matrix = jnp.stack(
+        [col0, col1, col2, col3, col4, col5,
+         col6, col7, col8, col9, col10, col11],
+        axis=1,
+    )  # (36, 12)
+
+    # ── Header ──
+    safe_trump   = jnp.clip(state.trump, 0, 5)
+    trump_oh     = (jnp.arange(6) == safe_trump) & (state.trump >= 0)  # (6,)
+    trick_num_oh = jnp.arange(9) == state.trick_num                     # (9,)
+    leader_oh    = jnp.arange(4) == state.trick_leader                  # (4,)
+
+    header = jnp.concatenate([
+        trump_oh,
+        jnp.bool_([state.forehand_passed]),
+        trick_num_oh,
+        leader_oh,
+    ])  # (20,)
+
+    return card_matrix, header
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Trump selection
+
 def _trump_selection_mask(state: GameState) -> Array:
     mask = jnp.zeros(NUM_ACTIONS, dtype=jnp.bool_)
     # Declare actions 36–41 always available.

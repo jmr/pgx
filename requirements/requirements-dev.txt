@@ -1,4 +1,6 @@
 jaxlib
+flax
+optax
 pytest
 pytest-xdist
 matplotlib

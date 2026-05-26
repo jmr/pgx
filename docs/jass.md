@@ -84,16 +84,18 @@ Total card points in every mode: 152 + 5 (last trick) = **157**.
 
 ## Observation
 
-Each player observes 120 boolean features:
+Each player observes 120 boolean features (partial information — other players' hands are hidden):
 
 | Index | Description |
 |:---:|:---|
 | `[0:36]` | Cards currently in my hand (card encoding below) |
-| `[36:72]` | Cards won in completed tricks (publicly known) |
+| `[36:72]` | Cards won in any completed trick (no team attribution) |
 | `[72:108]` | Cards played in the current trick so far |
 | `[108:112]` | Which player led the current trick (one-hot, players 0–3) |
 | `[112:119]` | Declared game mode (one-hot: ♦, ♥, ♠, ♣, Obenabe, Undeufe, not-yet-declared) |
 | `[119]` | 1 if it is this player's turn to declare trump |
+
+Note: `[36:72]` records *which* cards have been collected but not *by which team*. This is intentional for the partial observation — score state is not directly observable. See the Value Network Features section below for a full-information representation.
 
 **Card encoding** (indices 0–35):
 
@@ -127,21 +129,62 @@ Rewards range from −157 to +157. A perfect win (taking all 157 points) yields 
 
 The game terminates after all nine tricks have been played.
 
-## Alternative Observation: 2D Plane Layout
+## Value Network Features
 
-For CNN or attention-based models, a `(15, 36)` boolean plane layout may be preferable. Cards of the same suit occupy contiguous indices (♦: 0–8, ♥: 9–17, ♠: 18–26, ♣: 27–35), so 1D convolutions across the card axis naturally capture suit-level structure.
+`value_features(state, player)` in `pgx/_src/games/jass.py` builds a full-information
+feature representation for a learned value function. It is called on a **determinized**
+game state (all four hands known), as used inside MCTS leaf evaluation.
 
-| Plane | Description |
+It returns two arrays:
+
+### Card matrix — `(36, 12)` bool
+
+One row per card; cards of the same suit are contiguous (♦: 0–8, ♥: 9–17, ♠: 18–26, ♣: 27–35).
+Columns are player-relative (me / partner / left-opp / right-opp), so columns 0&7, 1&8, 2&9, 3&10
+always refer to the same player.
+
+| Col | Description |
 |:---:|:---|
-| 0 | Cards in my hand |
-| 1 | Cards won by my team in completed tricks |
-| 2 | Cards won by opponents in completed tricks |
-| 3–6 | Cards played in the current trick, one plane per seat relative to trick leader |
-| 7–12 | Declared trump mode (one-hot: ♦, ♥, ♠, ♣, Obenabe, Undeufe) — constant across all 36 positions |
-| 13 | Trump not yet declared — constant |
-| 14 | It is my turn to declare trump — constant |
+| 0 | I hold the card |
+| 1 | Partner holds it |
+| 2 | Left opponent holds it |
+| 3 | Right opponent holds it |
+| 4 | My team has collected it (I or partner won the trick) |
+| 5 | Opponent team has collected it |
+| 6 | Card is currently on the table in the trick |
+| 7 | I played it in the current trick |
+| 8 | Partner played it |
+| 9 | Left opponent played it |
+| 10 | Right opponent played it |
+| 11 | Card is trump in the current mode |
 
-Compared to the flat layout, this splits "cards played in previous tricks" into two planes (my team vs. opponents), preserving information about who won each trick that the flat encoding discards.
+Columns 0–5 and 7–10 are mutually exclusive per card (a card is held by exactly one player, or has been collected, or is in the trick). Column 6 is the OR of columns 7–10. Splitting mutually exclusive states across columns lets a single conv/attention layer attend to each fact directly.
+
+Column 11 (`is_trump`) is zero in Obenabe and Undeufe modes (no suit is trump in those modes).
+
+### Header — `(20,)` bool
+
+Scalar context that does not fit neatly into the card matrix:
+
+| Bits | Description |
+|:---:|:---|
+| `[0:6]` | Trump mode one-hot (♦, ♥, ♠, ♣, Obenabe, Undeufe) |
+| `[6]` | Forehand passed (Schiebe was played) |
+| `[7:16]` | Current trick number one-hot (0–8) |
+| `[16:20]` | Trick leader one-hot (players 0–3) |
+
+### Training target
+
+The value network predicts the **score differential** for the current player's team: `score_my_team − score_opponent_team` ∈ [−157, 157]. This is the quantity MCTS compares across actions and is a cleaner target than raw points in [0, 157].
+
+### Data augmentation
+
+Suit permutations are a free augmentation, but trump breaks the symmetry. In Obenabe and Undeufe all 4! = 24 suit permutations are valid. In trump modes, the three non-trump suits can be permuted freely (3! = 6×) but trump cannot be swapped with a non-trump suit.
+
+### Trump selection with V
+
+During trump selection, for each legal action apply it hypothetically to get `state_after_trump`,
+call `value_features`, run V, and pick the argmax over legal actions. No separate trump heuristic needed.
 
 ## Version History
 

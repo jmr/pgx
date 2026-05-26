@@ -76,6 +76,10 @@ class GameState(NamedTuple):
     led_suit:        Array = jnp.int32(-1)   # -1 before first card of trick
     cards_collected: Array = jnp.zeros((4, 36), dtype=jnp.bool_)
     trick_num:       Array = jnp.int32(0)    # 0–8; 9 after last trick resolved
+    # void_in_suit[p, s]: player p is known to hold no cards of suit s.
+    # Inferred when a follower plays off the led suit (excluding the Buur-exempt case).
+    # Used by the MCTS determinization sampler to avoid impossible card assignments.
+    void_in_suit:    Array = jnp.zeros((4, 4), dtype=jnp.bool_)
 
 
 class Game:
@@ -123,7 +127,7 @@ class Game:
         # Cards currently on the table in this trick.
         valid = state.trick_cards >= 0  # (4,)
         safe  = jnp.where(valid, state.trick_cards, 0)
-        in_trick = jnp.zeros(36, dtype=jnp.bool_).at[safe].set(valid)  # (36,)
+        in_trick = jnp.zeros(36, dtype=jnp.bool_).at[safe].max(valid)  # (36,)
         # Who led the current trick (one-hot, 4 bits).
         who_led = jnp.arange(4) == state.trick_leader  # (4,) bool
         # Trump mode one-hot (7 bits: ♦ ♥ ♠ ♣ Obenabe Undeufe not-declared).
@@ -255,17 +259,37 @@ def _card_play_step(state: GameState, action: Array) -> GameState:
     # Set led suit on first card of trick.
     led_suit = jnp.where(state.led_suit < 0, CARD_SUIT[card], state.led_suit)
 
+    # Infer void-in-suit.
+    # If a follower (not the trick leader) plays off the led suit, they are void
+    # in that suit — unless trump is led in a trump mode (Buur exemption makes
+    # the inference ambiguous: they may hold only the Buur, not be void in trump).
+    is_trump_mode  = (state.trump >= 0) & (state.trump < 4)
+    trump_suit     = jnp.clip(state.trump, 0, 3)
+    is_follower    = state.led_suit >= 0                       # player is not the leader
+    played_off_led = CARD_SUIT[card] != state.led_suit
+    led_is_trump   = is_trump_mode & (state.led_suit == trump_suit)
+    safe_led       = jnp.clip(state.led_suit, 0, 3)           # safe index for -1 case
+    can_infer_void = is_follower & played_off_led & ~led_is_trump
+
+    # Update void_in_suit[player, led_suit] ← True (vectorised outer product).
+    player_onehot    = jnp.arange(4) == player                # (4,)
+    suit_onehot      = jnp.arange(4) == safe_led              # (4,)
+    void_update      = can_infer_void & player_onehot[:, None] & suit_onehot[None, :]  # (4, 4)
+    new_void_in_suit = state.void_in_suit | void_update
+
     # After all 4 cards played: resolve trick.
     return jax.lax.cond(
         trick_count == 4,
         lambda: _resolve_trick(state._replace(
-            hands=hands, trick_cards=trick_cards, led_suit=led_suit
+            hands=hands, trick_cards=trick_cards, led_suit=led_suit,
+            void_in_suit=new_void_in_suit,
         )),
         lambda: state._replace(
             hands=hands,
             trick_cards=trick_cards,
             led_suit=led_suit,
             current_player=(player + 1) % 4,
+            void_in_suit=new_void_in_suit,
         ),
     )
 

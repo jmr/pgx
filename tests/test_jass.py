@@ -547,3 +547,130 @@ def test_full_game_invariants():
     safe_trump = jnp.clip(state.trump, 0, 5)
     card_pts = int((state.cards_collected * MODE_SCORES[safe_trump]).sum())
     assert card_pts == 152
+
+
+# ──────────────────────────────────────────────────
+# Observation
+
+def test_observe_in_trick_card_zero():
+    """Card 0 (♦6) played first in a trick must appear in the in-trick observation bits.
+
+    Regression: .at[safe].set(valid) with invalid slots mapped to index 0 would
+    overwrite the True at card 0 with False, silently dropping ♦6 from the observation.
+    """
+    # Build a state where player 0 has just played ♦6 (card 0).
+    hands = jnp.zeros((4, 36), dtype=jnp.bool_)
+    hands = hands.at[1, 9].set(True)   # player 1: ♥6 (needs a card so hand is non-empty)
+    hands = hands.at[2, 18].set(True)
+    hands = hands.at[3, 27].set(True)
+
+    state = GameState(
+        current_player=jnp.int32(1),
+        hands=hands,
+        trump=jnp.int32(1),
+        phase=jnp.int32(1),
+        trick_cards=jnp.int32([0, -1, -1, -1]),   # player 0 played ♦6 (card 0)
+        trick_leader=jnp.int32(0),
+        led_suit=jnp.int32(0),
+        cards_collected=jnp.zeros((4, 36), dtype=jnp.bool_),
+        trick_num=jnp.int32(0),
+    )
+
+    obs = game.observe(state, jnp.int32(1))
+    # in-trick bits are [72:108]; card 0 = ♦6 → index 72+0 = 72
+    assert bool(obs[72]), "♦6 (card 0) must appear in the in-trick observation"
+
+
+# ──────────────────────────────────────────────────
+# Void-in-suit tracking
+
+def test_void_leader_does_not_set_void():
+    """The trick leader playing any card must not set void."""
+    state = game.init(jax.random.PRNGKey(0))
+    state = game.step(state, jnp.int32(DECLARE_OFFSET))  # declare ♦ trump
+    # Player 0 leads — playing any card should not mark them void.
+    card = int(jnp.argmax(state.hands[0]))
+    next_state = game.step(state, jnp.int32(card))
+    assert not next_state.void_in_suit.any()
+
+
+def test_void_set_when_follower_plays_off_suit():
+    """Follower playing a card not matching the led suit → void in led suit."""
+    # Build a state where player 0 has led ♦6 (card 0) and player 1 holds no ♦ cards.
+    # player 1 must play something off-suit → should be marked void in ♦ (suit 0).
+    base = game.init(jax.random.PRNGKey(3))
+
+    # Give player 0 only ♦6; give player 1 only ♥ cards; others get the rest.
+    # Simplest: construct hands directly.
+    hands = jnp.zeros((4, 36), dtype=jnp.bool_)
+    hands = hands.at[0, 0].set(True)                       # player 0: ♦6
+    hands = hands.at[1, 9].set(True)                       # player 1: ♥6
+    hands = hands.at[2, 18].set(True)                      # player 2: ♠6
+    hands = hands.at[3, 27].set(True)                      # player 3: ♣6
+
+    state = GameState(
+        current_player=jnp.int32(1),
+        hands=hands,
+        trump=jnp.int32(2),            # ♠ trump — ♦ is a plain suit
+        phase=jnp.int32(1),
+        trick_cards=jnp.int32([0, -1, -1, -1]),  # player 0 played ♦6
+        trick_leader=jnp.int32(0),
+        led_suit=jnp.int32(0),         # ♦ led
+        cards_collected=jnp.zeros((4, 36), dtype=jnp.bool_),
+        trick_num=jnp.int32(0),
+    )
+
+    # Player 1 plays ♥6 (card 9) — off led suit ♦.
+    next_state = game.step(state, jnp.int32(9))
+    assert bool(next_state.void_in_suit[1, 0]), "player 1 should be void in ♦"
+    # No other voids should be set.
+    assert not next_state.void_in_suit[0].any()
+    assert not next_state.void_in_suit[2].any()
+    assert not next_state.void_in_suit[3].any()
+    assert not next_state.void_in_suit[1, 1:].any()
+
+
+def test_void_not_set_trump_led_off_suit():
+    """When trump is led, playing off-suit (Buur exemption) must NOT mark void in trump."""
+    hands = jnp.zeros((4, 36), dtype=jnp.bool_)
+    hands = hands.at[0, 0].set(True)   # player 0: ♦6 (trump, leads)
+    hands = hands.at[1, 9].set(True)   # player 1: ♥6 (off-suit)
+    hands = hands.at[2, 18].set(True)
+    hands = hands.at[3, 27].set(True)
+
+    state = GameState(
+        current_player=jnp.int32(1),
+        hands=hands,
+        trump=jnp.int32(0),            # ♦ trump — ♦ is led
+        phase=jnp.int32(1),
+        trick_cards=jnp.int32([0, -1, -1, -1]),
+        trick_leader=jnp.int32(0),
+        led_suit=jnp.int32(0),         # ♦ led (= trump)
+        cards_collected=jnp.zeros((4, 36), dtype=jnp.bool_),
+        trick_num=jnp.int32(0),
+    )
+
+    # Player 1 plays ♥6 — trump is led, this is the Buur-exempt ambiguous case.
+    next_state = game.step(state, jnp.int32(9))
+    # We must NOT infer void in trump suit (suit 0) for player 1.
+    assert not bool(next_state.void_in_suit[1, 0]), \
+        "must not infer void in trump when trump is led (Buur exemption ambiguity)"
+
+
+def test_void_accumulates_across_tricks():
+    """Void flags from multiple tricks accumulate and are never cleared."""
+    state = game.init(jax.random.PRNGKey(7))
+    state = game.step(state, jnp.int32(DECLARE_OFFSET + 1))  # ♥ trump
+    # Play two full tricks greedily; collect any voids set along the way.
+    for _ in range(8):
+        mask = game.legal_action_mask(state)
+        state = game.step(state, jnp.int32(jnp.argmax(mask)))
+    # Void flags can only be True, never go back to False.
+    # Run a few more steps and check monotonicity.
+    prev_void = state.void_in_suit
+    for _ in range(4):
+        mask = game.legal_action_mask(state)
+        state = game.step(state, jnp.int32(jnp.argmax(mask)))
+        assert (state.void_in_suit | prev_void == state.void_in_suit).all(), \
+            "void flags must be monotonically increasing"
+        prev_void = state.void_in_suit

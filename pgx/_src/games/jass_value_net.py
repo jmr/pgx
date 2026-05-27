@@ -95,6 +95,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--smoke", action="store_true",
                         help="Quick smoke test: 1 epoch, batch=64")
+    parser.add_argument("--save", default="jass_v_weights.msgpack",
+                        help="Path to write final weights (default: jass_v_weights.msgpack)")
     args = parser.parse_args()
 
     BATCH_SIZE  = 64   if args.smoke else 4096
@@ -138,3 +140,8 @@ if __name__ == "__main__":
             print(f"[{epoch:4d}]  train={float(train_loss):.4f}"
                   f"  eval={float(eval_loss):.4f}"
                   f"  ({elapsed:.0f}s)")
+
+    import flax.serialization
+    with open(args.save, "wb") as f:
+        f.write(flax.serialization.to_bytes(params))
+    print(f"\nWeights saved to {args.save}")

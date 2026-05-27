@@ -16,7 +16,7 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
-from pgx._src.games.jass import CARD_SUIT, Game, GameState, NUM_ACTIONS
+from pgx._src.games.jass import CARD_SUIT, Game, GameState, NUM_ACTIONS, value_features
 
 _game = Game()
 
@@ -170,33 +170,47 @@ def _random_rollout(state: GameState, key: Array) -> Array:
 # Main policy
 
 
-@functools.partial(jax.jit, static_argnames=("num_determinizations", "num_rollouts"))
+@functools.partial(jax.jit, static_argnames=("num_determinizations", "num_rollouts", "v_apply"))
 def best_action(
     state: GameState,
     player_id: Array,
     key: Array,
     num_determinizations: int = 32,
     num_rollouts: int = 8,
+    v_params=None,
+    v_apply=None,
+    v_scale: float = 100.0,
 ) -> Array:
-    """Return the action with the best estimated score via determinized rollouts.
+    """Return the action with the best estimated score.
 
-    For each of ``num_determinizations`` sampled consistent worlds:
-      - Apply each legal action.
-      - Run ``num_rollouts`` random rollouts from the resulting state.
-      - Record the mean reward for ``player_id``.
-    Average scores across determinizations; return the action with the highest
-    mean score (illegal actions receive −∞).
+    Two evaluation modes, selected by whether ``v_apply`` is provided:
 
-    JIT-compiled: ``num_determinizations`` and ``num_rollouts`` are static
-    (they determine array shapes). Subsequent calls with the same values reuse
-    the compiled kernel.
+    **Random rollouts** (``v_apply=None``, default):
+      For each of K determinizations × A actions, run N random rollouts and
+      average ``player_id``'s reward.
+
+    **Value network** (``v_apply`` provided):
+      For each of K determinizations × A actions, evaluate V(next_state) once.
+      No rollout dimension — N collapses to 1. Recommended K=64, N=1 for
+      matched wall-clock with the random-rollout K=8, N=8 baseline.
+
+    JIT-compiled: ``num_determinizations``, ``num_rollouts``, and ``v_apply``
+    are static (they determine array shapes and code paths).
 
     Args:
         state: Current game state as returned by the pgx environment.
         player_id: The acting player (should equal ``state.current_player``).
         key: JAX PRNG key consumed by this call.
         num_determinizations: Number of sampled worlds (K).
-        num_rollouts: Number of random rollouts per (world, action) pair (N).
+        num_rollouts: Random rollouts per (world, action) pair (N). Ignored
+            when ``v_apply`` is provided.
+        v_params: Flax params pytree for the value network. Required when
+            ``v_apply`` is provided.
+        v_apply: ``model.apply`` callable. When not None, V-based evaluation
+            is used instead of random rollouts. Static — different callables
+            produce different JIT traces.
+        v_scale: Multiply V output by this to recover raw score differential.
+            Must match the scale used during training (default 100.0).
 
     Returns:
         Scalar int32 action index.
@@ -208,9 +222,8 @@ def best_action(
     mask        = _game.legal_action_mask(state)                 # (A,) same for all dets
     first_legal = jnp.argmax(mask).astype(jnp.int32)            # fallback for illegal slots
 
-    split_keys   = jax.random.split(key, 1 + K)
-    det_keys     = split_keys[1:]                                # (K, 2)
-    rollout_keys = jax.random.split(split_keys[0], K * A * N).reshape(K, A, N, 2)
+    split_keys = jax.random.split(key, 1 + K)
+    det_keys   = split_keys[1:]                                  # (K, 2)
 
     # Sample K determinizations.
     det_states = jax.vmap(
@@ -219,23 +232,33 @@ def best_action(
 
     actions = jnp.arange(A, dtype=jnp.int32)                    # (A,)
 
-    def eval_det_action(det_state, action, rollout_ks):
-        """Score one action in one determinization by averaging N rollouts."""
-        safe_action = jnp.where(mask[action], action, first_legal)
-        next_state  = _game.step(det_state, safe_action)
-        scores      = jax.vmap(lambda k: _random_rollout(next_state, k))(rollout_ks)  # (N, 4)
-        return scores[:, player_id].mean()
+    if v_apply is not None:
+        # ── V-based leaf evaluation ──────────────────────────────────────────
+        # One forward pass per (determinization, action); no rollout dimension.
+        def eval_det_action_v(det_state, action):
+            safe_action = jnp.where(mask[action], action, first_legal)
+            next_state  = _game.step(det_state, safe_action)
+            cm, hd      = value_features(next_state, player_id)
+            return v_apply(v_params, cm[None], hd[None])[0] * v_scale
 
-    # Inner vmap: over A actions.
-    eval_over_actions = jax.vmap(eval_det_action, in_axes=(None, 0, 0))
-    # (GameState, (A,), (A, N, 2)) → (A,)
+        eval_over_actions = jax.vmap(eval_det_action_v, in_axes=(None, 0))
+        eval_over_dets    = jax.vmap(eval_over_actions, in_axes=(0, None))
+        det_action_scores = eval_over_dets(det_states, actions)  # (K, A)
 
-    # Outer vmap: over K determinizations.
-    eval_over_dets = jax.vmap(eval_over_actions, in_axes=(0, None, 0))
-    # ((K,) GameState, (A,), (K, A, N, 2)) → (K, A)
+    else:
+        # ── Random rollout leaf evaluation ───────────────────────────────────
+        rollout_keys = jax.random.split(split_keys[0], K * A * N).reshape(K, A, N, 2)
 
-    det_action_scores = eval_over_dets(det_states, actions, rollout_keys)  # (K, A)
-    mean_scores       = det_action_scores.mean(axis=0)                     # (A,)
+        def eval_det_action_r(det_state, action, rollout_ks):
+            safe_action = jnp.where(mask[action], action, first_legal)
+            next_state  = _game.step(det_state, safe_action)
+            scores      = jax.vmap(lambda k: _random_rollout(next_state, k))(rollout_ks)  # (N, 4)
+            return scores[:, player_id].mean()
 
+        eval_over_actions = jax.vmap(eval_det_action_r, in_axes=(None, 0, 0))
+        eval_over_dets    = jax.vmap(eval_over_actions, in_axes=(0, None, 0))
+        det_action_scores = eval_over_dets(det_states, actions, rollout_keys)  # (K, A)
+
+    mean_scores   = det_action_scores.mean(axis=0)               # (A,)
     masked_scores = jnp.where(mask, mean_scores, jnp.float32(-jnp.inf))
     return jnp.argmax(masked_scores).astype(jnp.int32)

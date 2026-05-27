@@ -198,6 +198,20 @@ def test_best_action_all_players():
         assert bool(mask[action])
 
 
+def test_best_action_with_constant_v():
+    """V-MCTS returns a legal action when V is a constant function."""
+    state = _deal(jax.random.PRNGKey(20))
+    state = game.step(state, jnp.int32(DECLARE_OFFSET))  # enter card-play phase
+    player_id = state.current_player
+
+    v_apply = lambda params, cm, hd: jnp.zeros(cm.shape[0])
+    action = best_action(state, player_id, jax.random.PRNGKey(1),
+                         num_determinizations=4, num_rollouts=1,
+                         v_apply=v_apply, v_params={})
+    assert bool(game.legal_action_mask(state)[action]), \
+        f"V-MCTS returned illegal action {int(action)}"
+
+
 def test_best_action_full_game():
     """Play a full game using best_action; game should terminate."""
     state = _deal(jax.random.PRNGKey(40))

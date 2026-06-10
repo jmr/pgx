@@ -76,14 +76,16 @@ Cheap; do before any new code. Train V₀ with the existing driver
 - **~2026-05 (preliminary, pre-pairing-fix arena, 100 unpaired games):**
   V-MCTS K=64 with random-play V₀: **31 wins vs 69** for the random-rollout
   K=8 N=8 baseline, t ≈ −6 (decisive, ≈20+ pts/game deficit).
-  Confirms the thesis negative result in this stack. Below-parity (not just
-  parity) is explained by: (a) V₀'s approximation error is *biased* and
-  highly correlated across the 64 determinizations (similar feature inputs),
-  so it doesn't average out the way rollout noise does, and argmax action
-  selection harvests the bias; (b) late-game random rollouts are near-exact
-  (tiny remaining tree) while V₀'s error is constant across stages;
-  (c) V₀ also picks trump, where random-play values are least informative;
-  (d) V₀ was likely undertrained (see trainer note in Step 1).
+  Confirms the thesis negative result in this stack. V₀ was trained to
+  plateau (colab: ~1k gradient steps at batch 8192, loss flat after ~500),
+  so this is a clean measurement of the random-play-value ceiling, not an
+  undertraining artifact. Below-parity (not just parity) is explained by:
+  (a) V₀'s approximation error is *biased* and highly correlated across the
+  64 determinizations (similar feature inputs), so it doesn't average out
+  the way rollout noise does, and argmax action selection harvests the
+  bias; (b) late-game random rollouts are near-exact (tiny remaining tree)
+  while V₀'s error is constant across stages; (c) V₀ also picks trump,
+  where random-play values are least informative.
 - TODO: redo with the swapped-deal-paired arena so the recorded baseline is
   measured the same way as later Step 1 gates.
 
@@ -107,12 +109,14 @@ Smallest change that adds the missing ingredient. Tasks:
 4. **Gated promotion.** New V must beat old V in `jass_v_arena.py` (significant
    at p<0.05 on the paired tests) before becoming the data generator. Keep all
    generation weights (`v0.msgpack`, `v1.msgpack`, ...).
-5. **Fix the trainer's optimization budget.** The current driver in
-   `jass_value_net.py` takes ONE gradient step per collected batch
-   ("epoch"), i.e. 200 steps total — almost certainly underfit. Take
-   multiple shuffled minibatch steps per collected batch and verify eval
-   loss actually plateaus before a generation is arena-gated; otherwise
-   gate failures are uninterpretable (bad data vs. undertrained net).
+5. **Port the real training loop into the repo driver.** The checked-in
+   `jass_value_net.py` driver takes one gradient step per collected batch
+   (200 steps total); the V₀ that was actually evaluated was trained in a
+   colab notebook loop (~1k steps of `step_fn` at batch 8192, loss
+   plateauing after ~500). Bring those settings into the driver so runs
+   are reproducible outside the notebook, and verify eval loss plateaus
+   before a generation is arena-gated; otherwise gate failures are
+   uninterpretable (bad data vs. undertrained net).
 6. Iterate 2–3 generations.
 
 **Success criterion:** monotone improvement across generations AND beating the

@@ -117,7 +117,16 @@ Smallest change that adds the missing ingredient. Tasks:
    (bad data vs. undertrained net). For generation ≥1, `train_model()`
    needs a data-generator hook (e.g. a `collect_fn` argument) instead of
    the hardcoded random-play `collect_batch` import.
-6. Iterate 2–3 generations.
+6. **Batched arena (infrastructure).** The arena plays one game at a time
+   with a Python loop and two host syncs per move — dispatch-bound, and
+   pathological on accelerators (measured ~8.5 s/game on a colab 1×1 v5 TPU
+   vs ~0.9 s/game of actual compute on an M-series CPU). Gating runs the
+   arena repeatedly, so batch it: vmap a batch of games in lockstep, one
+   `lax.scan` over plies, evaluate BOTH agents' `best_action` on every
+   board each ply and select by seat parity (2× compute waste, ~100×
+   parallelism, zero per-move dispatch). Until then, run the arena on CPU
+   (`JAX_PLATFORMS=cpu`), not TPU/GPU.
+7. Iterate 2–3 generations.
 
 **Success criterion:** monotone improvement across generations AND beating the
 rollout baseline. If generation 2 does not beat generation 1, **debug here**

@@ -16,11 +16,11 @@ Implemented and tested (65 tests in `tests/test_jass*.py`):
 | Game env (single hand, tournament rules) | `pgx/_src/games/jass.py`, `pgx/jass.py` | 43 actions, 120-bit obs; see `docs/jass.md` |
 | Void-aware determinization + flat-rollout MCTS (Option A) | `pgx/_src/games/jass_mcts.py` | `best_action(state, player, key, K, N)`; jitted, vmapped |
 | Full-information value features | `value_features()` in `jass.py` | (36,12) card matrix + (20,) header; see `docs/jass.md` |
-| Value net + training step | `pgx/_src/games/jass_value_net.py` | per-card MLP → pool → head; target = differential/100 |
+| Value net + `train_model()` | `pgx/_src/games/jass_value_net.py` | per-card MLP → pool → head; target = differential/100. NOTE: defaults (200 epochs × batch 4096) are NOT the canonical V₀ settings — use `num_epochs=1000, batch_size=8192` (loss plateaus ~500) |
 | Self-play data collection | `pgx/_src/games/jass_selfplay.py` | **currently uniform-random play** — see "Key insight" below |
 | V wired into `best_action` as leaf evaluator | `jass_mcts.py` (`v_apply`/`v_params`/`v_scale`) | replaces N rollouts with one V(next_state) call; K=64, N=1 recommended |
 | K/N sweep harness | `scripts/jass_sweep.py` | found K≥8 indistinguishable, K=4 worse → random rollouts are the ceiling |
-| V-MCTS vs rollout arena | `scripts/jass_v_arena.py` | paired t-test, sign test, Wilson 95% CI |
+| V-MCTS vs rollout arena | `pgx/_src/games/jass_v_arena.py` (`run_arena()`, colab-friendly; `scripts/jass_v_arena.py` is a thin CLI wrapper) | swapped-deal pairs; paired t-test + sign test on pair means, Wilson 95% CI |
 
 External reference: `~/Documents/src/JassTheRipper` — a competitive Java DMCTS
 Jass agent. Its `IDEAS.md` documents extensive negative results (see below) and
@@ -63,9 +63,10 @@ own analysis identifies as the real levers — are:
 
 ## Step 0 — Baseline the random-play V₀  [Status: preliminary result; redo paired]
 
-Cheap; do before any new code. Train V₀ with the existing driver
-(`python -m pgx._src.games.jass_value_net --save v0.msgpack`), then run
-`scripts/jass_v_arena.py` against the K=8,N=8 rollout baseline.
+Cheap; do before any new code. Train V₀ with
+`train_model(num_epochs=1000, batch_size=8192)` (the canonical V₀ settings —
+NOT the CLI defaults), then run the arena (`run_arena()` or
+`scripts/jass_v_arena.py`) against the K=8,N=8 rollout baseline.
 
 - Expect roughly parity or worse (per the thesis result). That is fine.
 - **Do not tune anything here.** The number exists only as the yardstick for
@@ -106,17 +107,19 @@ Smallest change that adds the missing ingredient. Tasks:
    trump one-hot in the header.
 3. **Replay buffer.** Mix the last few generations of data (e.g. uniform over
    the most recent 3) to avoid catastrophic drift.
-4. **Gated promotion.** New V must beat old V in `jass_v_arena.py` (significant
+4. **Gated promotion.** New V must beat old V in the arena (significant
    at p<0.05 on the paired tests) before becoming the data generator. Keep all
    generation weights (`v0.msgpack`, `v1.msgpack`, ...).
-5. **Port the real training loop into the repo driver.** The checked-in
-   `jass_value_net.py` driver takes one gradient step per collected batch
-   (200 steps total); the V₀ that was actually evaluated was trained in a
-   colab notebook loop (~1k steps of `step_fn` at batch 8192, loss
-   plateauing after ~500). Bring those settings into the driver so runs
-   are reproducible outside the notebook, and verify eval loss plateaus
-   before a generation is arena-gated; otherwise gate failures are
-   uninterpretable (bad data vs. undertrained net).
+5. **Finish porting the colab training loop.** `train_model()` is now in
+   `jass_value_net.py` ("[Jass] Extract train_model() from CLI driver"), so
+   colab and CLI share one loop. Remaining: the defaults (200 epochs ×
+   batch 4096) still don't reproduce the evaluated V₀ — canonical settings
+   are `num_epochs=1000, batch_size=8192` (loss plateaus ~500). Either bump
+   the defaults or always pass them explicitly, and verify eval loss
+   plateaus before a generation is arena-gated; otherwise gate failures are
+   uninterpretable (bad data vs. undertrained net). For generation ≥1,
+   `train_model()` needs a data-generator hook (e.g. a `collect_fn`
+   argument) instead of the hardcoded random-play `collect_batch` import.
 6. Iterate 2–3 generations.
 
 **Success criterion:** monotone improvement across generations AND beating the

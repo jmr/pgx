@@ -14,9 +14,11 @@ Usage:
     pred = model.apply(params, cm, hd)   # (B,) predicted differential / scale
 """
 
+import os
 import time
 
 import flax.linen as nn
+import flax.serialization
 import jax
 import jax.numpy as jnp
 import optax
@@ -92,6 +94,14 @@ def make_train_step(model: ValueNet, optimizer: optax.GradientTransformation):
 # ── Training ──────────────────────────────────────────────────────────────────
 
 
+def _save_checkpoint(path, params, opt_state, next_epoch: int):
+    """Atomically write (params, opt_state, next_epoch) to path."""
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(flax.serialization.to_bytes((params, opt_state, next_epoch)))
+    os.replace(tmp, path)
+
+
 def train_model(
     *,
     collect_fn=None,
@@ -100,6 +110,8 @@ def train_model(
     lr: float = 3e-4,
     print_every: int = 100,
     seed: int = 0,
+    checkpoint_path: str = None,
+    checkpoint_every: int = 100,
 ) -> tuple:
     """Train a ValueNet from scratch on self-play data.
 
@@ -120,6 +132,14 @@ def train_model(
         lr: Adam learning rate.
         print_every: Print train/eval loss every N epochs.
         seed: PRNG seed for reproducibility.
+        checkpoint_path: If given, (params, opt_state, epoch) is written
+            here every checkpoint_every epochs (atomically; put it on
+            Drive in colab). If the file already exists, training RESUMES
+            from it: the RNG stream is fast-forwarded so the resumed run
+            consumes the same data sequence as an uninterrupted one and
+            produces identical final weights. Resume assumes the same
+            collect_fn / batch_size / lr / seed as the interrupted run.
+        checkpoint_every: Checkpoint interval in epochs.
 
     Returns:
         (params, model) — trained Flax parameters and the ValueNet instance.
@@ -135,6 +155,14 @@ def train_model(
     opt_state = optimizer.init(params)
     step_fn = make_train_step(model, optimizer)
 
+    start_epoch = 0
+    if checkpoint_path is not None and os.path.exists(checkpoint_path):
+        with open(checkpoint_path, "rb") as f:
+            params, opt_state, start_epoch = flax.serialization.from_bytes(
+                (params, opt_state, 0), f.read()
+            )
+        print(f"Resuming from {checkpoint_path} at epoch {start_epoch}\n")
+
     print("Collecting holdout batch for eval ...")
     key, k_eval = jax.random.split(key)
     cm_eval, hd_eval, y_eval, alive_eval = collect_fn(k_eval, batch_size)
@@ -147,6 +175,9 @@ def train_model(
     t0 = time.perf_counter()
     for epoch in range(num_epochs):
         key, k1 = jax.random.split(key)
+        if epoch < start_epoch:
+            continue  # replay the RNG stream up to the checkpoint
+
         cm, hd, y, alive = collect_fn(k1, batch_size)
 
         cm = cm.reshape(-1, 36, 12)
@@ -163,6 +194,9 @@ def train_model(
                   f"  eval={float(eval_loss):.4f}"
                   f"  ({elapsed:.0f}s)")
 
+        if checkpoint_path is not None and (epoch + 1) % checkpoint_every == 0:
+            _save_checkpoint(checkpoint_path, params, opt_state, epoch + 1)
+
     return params, model
 
 
@@ -170,7 +204,6 @@ def train_model(
 
 if __name__ == "__main__":
     import argparse
-    import flax.serialization
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--smoke", action="store_true",

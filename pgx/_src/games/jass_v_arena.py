@@ -151,15 +151,24 @@ def print_stats(label_c: str, label_b: str, scores: np.ndarray):
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
-def run_arena(params, *, k_v=64, k_base=8, n_base=8,
+def run_arena(params, *, baseline_params=None, k_v=64, k_base=8, n_base=8,
               games=1000, hours=4.0, seed=0):
-    """Run V-MCTS (with value net) vs random-rollout MCTS arena.
+    """Run a V-MCTS challenger against a baseline agent.
+
+    Default baseline is random-rollout MCTS (K=k_base, N=n_base). Pass
+    baseline_params to instead play V-MCTS vs V-MCTS — the gated-promotion
+    arena from docs/jass_plan.md Step 1, e.g.:
+
+        run_arena(v1_params, baseline_params=v0_params, k_v=64, k_base=64)
 
     Args:
-        params:  Flax parameter tree from a trained ValueNet.
+        params:  Flax parameter tree for the challenger's ValueNet.
+        baseline_params: Optional ValueNet params for a V-MCTS baseline
+            (K=k_base, N=1). None = random-rollout baseline.
         k_v:     Determinizations for V-MCTS challenger.
-        k_base:  Determinizations for random-rollout baseline.
-        n_base:  Rollouts per action for baseline.
+        k_base:  Determinizations for the baseline.
+        n_base:  Rollouts per action for the random-rollout baseline
+            (ignored when baseline_params is given).
         games:   Maximum number of games to play.
         hours:   Time budget in hours.
         seed:    PRNG seed.
@@ -178,17 +187,27 @@ def run_arena(params, *, k_v=64, k_base=8, n_base=8,
     best_action(state0, state0.current_player, jax.random.PRNGKey(0),
                 num_determinizations=k_v, num_rollouts=1,
                 v_params=params, v_apply=model.apply, v_scale=TARGET_SCALE)
-    best_action(state0, state0.current_player, jax.random.PRNGKey(0),
-                num_determinizations=k_base, num_rollouts=n_base)
+    if baseline_params is None:
+        best_action(state0, state0.current_player, jax.random.PRNGKey(0),
+                    num_determinizations=k_base, num_rollouts=n_base)
+    elif k_base != k_v:
+        best_action(state0, state0.current_player, jax.random.PRNGKey(0),
+                    num_determinizations=k_base, num_rollouts=1,
+                    v_params=baseline_params, v_apply=model.apply,
+                    v_scale=TARGET_SCALE)
     jax.effects_barrier()
     print(f"  Compiled in {time.perf_counter()-t0:.1f}s\n", flush=True)
 
     # ── Run arena ─────────────────────────────────────────────────────────
     challenger = make_v_agent(k_v, params, model)
-    baseline   = make_random_agent(k_base, n_base)
+    if baseline_params is None:
+        baseline = make_random_agent(k_base, n_base)
+        label_b  = f"random K={k_base} N={n_base}"
+    else:
+        baseline = make_v_agent(k_base, baseline_params, model)
+        label_b  = f"V-MCTS K={k_base} (baseline weights)"
 
     label_c = f"V-MCTS K={k_v}"
-    label_b = f"random K={k_base} N={n_base}"
 
     print(f"Challenger : {label_c}")
     print(f"Baseline   : {label_b}")

@@ -14,10 +14,14 @@ Usage:
     pred = model.apply(params, cm, hd)   # (B,) predicted differential / scale
 """
 
+import time
+
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import optax
+
+from pgx._src.games.jass_selfplay import collect_batch
 
 # Scale target into roughly [-1, 1] for stable training.
 # The network outputs pred ≈ differential / SCALE; multiply back at inference.
@@ -85,63 +89,91 @@ def make_train_step(model: ValueNet, optimizer: optax.GradientTransformation):
     return train_step
 
 
-# ── Driver ────────────────────────────────────────────────────────────────────
+# ── Training ──────────────────────────────────────────────────────────────────
 
-if __name__ == "__main__":
-    import argparse
-    import time
-    from pgx._src.games.jass_selfplay import collect_batch
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--smoke", action="store_true",
-                        help="Quick smoke test: 1 epoch, batch=64")
-    parser.add_argument("--save", default="jass_v_weights.msgpack",
-                        help="Path to write final weights (default: jass_v_weights.msgpack)")
-    args = parser.parse_args()
+def train_model(
+    *,
+    batch_size: int = 4096,
+    num_epochs: int = 200,
+    lr: float = 3e-4,
+    print_every: int = 10,
+    seed: int = 0,
+) -> tuple:
+    """Train a ValueNet from scratch on random self-play.
 
-    BATCH_SIZE  = 64   if args.smoke else 4096
-    NUM_EPOCHS  = 1    if args.smoke else 200
-    LR          = 3e-4
-    PRINT_EVERY = 1    if args.smoke else 10
+    Each epoch generates a fresh batch of random games as training data.
+    A fixed holdout set (same size) is collected once up front for eval.
 
-    key = jax.random.PRNGKey(0)
+    Args:
+        batch_size: Number of games per training batch and holdout set.
+        num_epochs: Total training epochs.
+        lr: Adam learning rate.
+        print_every: Print train/eval loss every N epochs.
+        seed: PRNG seed for reproducibility.
 
-    model     = ValueNet()
-    key, k0   = jax.random.split(key)
-    params    = model.init(k0, jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
-    optimizer = optax.adam(LR)
+    Returns:
+        (params, model) — trained Flax parameters and the ValueNet instance.
+    """
+    key = jax.random.PRNGKey(seed)
+
+    model = ValueNet()
+    key, k0 = jax.random.split(key)
+    params = model.init(k0, jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
+    optimizer = optax.adam(lr)
     opt_state = optimizer.init(params)
-    step_fn   = make_train_step(model, optimizer)
+    step_fn = make_train_step(model, optimizer)
 
-    print(f"Collecting holdout batch for eval ...")
+    print("Collecting holdout batch for eval ...")
     key, k_eval = jax.random.split(key)
-    cm_eval, hd_eval, y_eval, alive_eval = collect_batch(k_eval, BATCH_SIZE)
-    cm_eval   = cm_eval.reshape(-1, 36, 12)
-    hd_eval   = hd_eval.reshape(-1, 20)
-    y_eval    = y_eval.reshape(-1)
+    cm_eval, hd_eval, y_eval, alive_eval = collect_batch(k_eval, batch_size)
+    cm_eval = cm_eval.reshape(-1, 36, 12)
+    hd_eval = hd_eval.reshape(-1, 20)
+    y_eval = y_eval.reshape(-1)
     mask_eval = alive_eval.reshape(-1).astype(jnp.float32)
     print(f"  {int(mask_eval.sum())} labeled positions\n")
 
     t0 = time.perf_counter()
-    for epoch in range(NUM_EPOCHS):
+    for epoch in range(num_epochs):
         key, k1 = jax.random.split(key)
-        cm, hd, y, alive = collect_batch(k1, BATCH_SIZE)
+        cm, hd, y, alive = collect_batch(k1, batch_size)
 
-        cm   = cm.reshape(-1, 36, 12)
-        hd   = hd.reshape(-1, 20)
-        y    = y.reshape(-1)
+        cm = cm.reshape(-1, 36, 12)
+        hd = hd.reshape(-1, 20)
+        y = y.reshape(-1)
         mask = alive.reshape(-1).astype(jnp.float32)
 
         params, opt_state, train_loss = step_fn(params, opt_state, cm, hd, y, mask)
 
-        if epoch % PRINT_EVERY == 0:
+        if epoch % print_every == 0:
             _, _, eval_loss = step_fn(params, opt_state, cm_eval, hd_eval, y_eval, mask_eval)
             elapsed = time.perf_counter() - t0
             print(f"[{epoch:4d}]  train={float(train_loss):.4f}"
                   f"  eval={float(eval_loss):.4f}"
                   f"  ({elapsed:.0f}s)")
 
+    return params, model
+
+
+# ── CLI Driver ────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    import argparse
     import flax.serialization
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--smoke", action="store_true",
+                        help="Quick smoke test: 1 epoch, batch=64")
+    parser.add_argument("--save", default="jass_v_weights.msgpack",
+                        help="Path to write final weights")
+    args = parser.parse_args()
+
+    params, model = train_model(
+        batch_size=64 if args.smoke else 4096,
+        num_epochs=1 if args.smoke else 200,
+        print_every=1 if args.smoke else 10,
+    )
+
     with open(args.save, "wb") as f:
         f.write(flax.serialization.to_bytes(params))
     print(f"\nWeights saved to {args.save}")

@@ -61,7 +61,7 @@ own analysis identifies as the real levers — are:
 
 ---
 
-## Step 0 — Baseline the random-play V₀  [Status: preliminary result; redo paired]
+## Step 0 — Baseline the random-play V₀  [Status: DONE 2026-06-10]
 
 Cheap; do before any new code. Train V₀ with `train_model()` (defaults are
 the canonical V₀ settings: 1000 epochs × batch 8192), then run the arena
@@ -87,8 +87,14 @@ baseline.
   bias; (b) late-game random rollouts are near-exact (tiny remaining tree)
   while V₀'s error is constant across stages; (c) V₀ also picks trump,
   where random-play values are least informative.
-- TODO: redo with the swapped-deal-paired arena so the recorded baseline is
-  measured the same way as later Step 1 gates.
+- **2026-06-10 (RECORDED BASELINE — swapped-deal-paired arena, 100 games /
+  50 pairs, colab 1×1 v5 TPU):** challenger V-MCTS K=64 with random-play V₀
+  vs random-rollout K=8 N=8: **win 33%, mean −37.5 pts/game, sd(game)=66.8,
+  sd(pair mean)=32.5, t=−8.08** on pair means (p≈1e-10). Consistent with
+  the preliminary run, deficit even larger. This is the yardstick Step 1
+  generations must beat. Note: sd(pair mean)≈half sd(game) → pairing gives
+  ~2× effective sample size here (same-deal games diverge via trump
+  choices, so cancellation is partial).
 
 ## Step 1 — Close the expert-iteration loop, V only  [Status: TODO]
 

@@ -94,16 +94,19 @@ def make_train_step(model: ValueNet, optimizer: optax.GradientTransformation):
 
 def train_model(
     *,
-    batch_size: int = 4096,
-    num_epochs: int = 200,
+    batch_size: int = 8192,
+    num_epochs: int = 1000,
     lr: float = 3e-4,
-    print_every: int = 10,
+    print_every: int = 100,
     seed: int = 0,
 ) -> tuple:
     """Train a ValueNet from scratch on random self-play.
 
     Each epoch generates a fresh batch of random games as training data.
     A fixed holdout set (same size) is collected once up front for eval.
+
+    The defaults are the canonical V0 settings (eval loss plateaus around
+    epoch 500); see docs/jass_plan.md Step 0.
 
     Args:
         batch_size: Number of games per training batch and holdout set.
@@ -168,11 +171,10 @@ if __name__ == "__main__":
                         help="Path to write final weights")
     args = parser.parse_args()
 
-    params, model = train_model(
-        batch_size=64 if args.smoke else 4096,
-        num_epochs=1 if args.smoke else 200,
-        print_every=1 if args.smoke else 10,
-    )
+    if args.smoke:
+        params, model = train_model(batch_size=64, num_epochs=1, print_every=1)
+    else:
+        params, model = train_model()
 
     with open(args.save, "wb") as f:
         f.write(flax.serialization.to_bytes(params))

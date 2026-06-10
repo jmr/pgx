@@ -1,5 +1,9 @@
 # Jass MCTS Design
 
+> **Roadmap:** see `docs/jass_plan.md` for the incremental plan from the current
+> determinized MCTS to a full AlphaZero-style agent (expert iteration, policy
+> head, PUCT via mctx), including step status and arena results.
+
 Jass is a game of imperfect information: each player knows only their own hand, the declared trump, and the cards that have been played publicly. Standard MCTS assumes a fully observable state, so it cannot be applied directly. This document describes the determinization approach and two implementation options.
 
 ## Background: Determinization
@@ -134,7 +138,7 @@ action = jnp.argmax(jnp.sum(policy_output.action_weights, axis=0))
 
 **Challenges:**
 - mctx dependency.
-- Aggregating across determinizations requires thought: the K trees have independent visit counts, and the policy output needs to be combined carefully (vote vs. sum of visit counts vs. sum of values).
+- Aggregating across determinizations: **sum visit counts across the K trees and argmax** (not Q-sum). JassTheRipper's instrumentation showed Q-sum aggregation neutralizes the tree policy entirely (UCB c was a wash across 7 orders of magnitude); visit counts must be load-bearing for policy priors to matter. See `docs/jass_plan.md`.
 - The `recurrent_fn` interface assumes the state is the embedding — works cleanly since `GameState` is a JAX pytree.
 
 ---

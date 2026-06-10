@@ -179,7 +179,7 @@ The value network predicts the **score differential** for the current player's t
 
 ### Data augmentation
 
-Suit permutations are a free augmentation, but trump breaks the symmetry. In Obenabe and Undeufe all 4! = 24 suit permutations are valid. In trump modes, the three non-trump suits can be permuted freely (3! = 6×) but trump cannot be swapped with a non-trump suit.
+Suit permutations are a free augmentation, but trump breaks the symmetry. In Obenabe and Undeufe all 4! = 24 suit permutations are valid. In trump modes, the three non-trump suits can be permuted freely (3! = 6×) but trump cannot be swapped with a non-trump suit. **Not yet implemented** — scheduled as part of Step 1 in `docs/jass_plan.md`.
 
 ### Trump selection with V
 

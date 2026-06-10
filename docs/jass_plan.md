@@ -100,12 +100,13 @@ baseline.
 
 Smallest change that adds the missing ingredient. Tasks:
 
-1. **Agent-driven self-play.** Replace the uniform-random policy in
-   `jass_selfplay.collect_batch` with the current best agent. For generation 1,
-   V-greedy with exploration (softmax over V(next_state) at temperature τ, or
-   ε-greedy) is acceptable and stays cheaply vmappable inside `lax.scan`.
-   Full `best_action` per move inside the scan is too slow for data generation
-   at first; optionally mix in a small fraction of search-generated games later.
+1. **Agent-driven self-play.** DONE (code):
+   `jass_selfplay.make_v_collect_fn(v_apply, v_params, v_scale=TARGET_SCALE,
+   temperature=10.0)` — V-greedy softmax over V(next_state), vmappable,
+   same contract as `collect_batch`; plug into
+   `train_model(collect_fn=...)`. Full `best_action` per move inside the
+   scan is too slow for data generation at first; optionally mix in a
+   small fraction of search-generated games later.
 2. **Suit-permutation augmentation.** Documented in `docs/jass.md` but NOT yet
    implemented. 3! = 6× in trump modes (non-trump suits permute freely; trump
    suit fixed), 4! = 24× in Obenabe/Undeufe. Apply to (cm, hd, y) batches —
@@ -118,11 +119,10 @@ Smallest change that adds the missing ingredient. Tasks:
    generation weights (`v0.msgpack`, `v1.msgpack`, ...).
 5. **Finish porting the colab training loop.** `train_model()` is now in
    `jass_value_net.py` with defaults matching the canonical V₀ settings
-   (1000 epochs × batch 8192). Remaining: verify eval loss plateaus before
+   (1000 epochs × batch 8192) and a `collect_fn` hook for plugging in the
+   V-guided generator (DONE). Remaining: verify eval loss plateaus before
    a generation is arena-gated; otherwise gate failures are uninterpretable
-   (bad data vs. undertrained net). For generation ≥1, `train_model()`
-   needs a data-generator hook (e.g. a `collect_fn` argument) instead of
-   the hardcoded random-play `collect_batch` import.
+   (bad data vs. undertrained net).
 6. **Batched arena (infrastructure).** The arena plays one game at a time
    with a Python loop and two host syncs per move — dispatch-bound, and
    pathological on accelerators (measured ~8.5 s/game on a colab 1×1 v5 TPU

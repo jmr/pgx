@@ -1,12 +1,13 @@
 """
 Sweep (K, N) configurations against the K=8, N=8 baseline.
 
-Each pair of consecutive games uses the same random sequence but swaps which
-team is the challenger to cancel out the forehand (trump-selection) advantage.
+Each pair of consecutive games replays the same deal (same PRNG key) but swaps
+which team is the challenger, cancelling deal-strength variance and the
+forehand (trump-selection) advantage.
 
 Statistical tests (following JassTheRipper Arena.java):
-  - Paired t-test on score differences (challenger − baseline per game)
-  - Two-sided sign test (binomial) on wins vs losses, excluding ties
+  - Paired t-test on per-pair mean scores (challenger − baseline)
+  - Two-sided sign test (binomial) on pair wins vs losses, excluding ties
 
 Note: ties are theoretically impossible in Jass (total = 157 points, odd).
 """
@@ -53,34 +54,32 @@ def play_game(K_a, N_a, K_b, N_b, key):
 # ── Matchup runner ─────────────────────────────────────────────────────────────
 
 def run_matchup(K_c, N_c, max_games, time_budget_s, seed=0):
-    """Run challenger (K_c, N_c) vs baseline, alternating sides.
+    """Run challenger (K_c, N_c) vs baseline in swapped-deal pairs.
 
-    Odd-indexed games: challenger = team A (forehand / trump selection advantage).
-    Even-indexed games: challenger = team B.
-    Score is always recorded from the challenger's perspective.
+    Each pair replays the same deal (same PRNG key): challenger as team A in
+    the first game, team B in the second. Score is always recorded from the
+    challenger's perspective.
 
-    Returns: np.ndarray of challenger score differences (shape [n_games]).
+    Returns: np.ndarray of challenger score differences (even length;
+    consecutive entries (2j, 2j+1) form pair j).
     """
     scores = []
     key = jax.random.PRNGKey(seed)
     t_start = time.perf_counter()
 
-    for i in range(max_games):
+    for _ in range(max_games // 2):
         if time.perf_counter() - t_start > time_budget_s:
             break
-        key, subkey = jax.random.split(key)
-        if i % 2 == 0:
-            score = play_game(K_c, N_c, BASELINE_K, BASELINE_N, subkey)
-        else:
-            score = -play_game(BASELINE_K, BASELINE_N, K_c, N_c, subkey)
-        scores.append(score)
+        key, pair_key = jax.random.split(key)
+        scores.append(play_game(K_c, N_c, BASELINE_K, BASELINE_N, pair_key))
+        scores.append(-play_game(BASELINE_K, BASELINE_N, K_c, N_c, pair_key))
 
-        if (i + 1) % 20 == 0:
+        if len(scores) % 20 == 0:
             arr = np.array(scores)
             w = (arr > 0).sum()
             l = (arr < 0).sum()
             elapsed = time.perf_counter() - t_start
-            print(f"  [{i+1:4d}]  wins={w}  losses={l}  mean={arr.mean():+.1f}"
+            print(f"  [{len(scores):4d}]  wins={w}  losses={l}  mean={arr.mean():+.1f}"
                   f"  ({elapsed:.0f}s elapsed)", flush=True)
 
     return np.array(scores)
@@ -107,12 +106,16 @@ def print_stats(K_c, N_c, scores):
     ties   = n - wins - losses
     n_eff  = wins + losses
 
-    # Paired t-test: is mean score diff significantly != 0?
-    t_stat, p_t = stats.ttest_1samp(scores, 0)
-
-    # Two-sided sign test (binomial H0: p_win = 0.5, excluding ties)
-    binom = stats.binomtest(wins, n_eff, p=0.5, alternative='two-sided')
-    p_sign = binom.pvalue
+    # Inference on per-pair means: the two same-deal games cancel deal
+    # strength and forehand advantage, so pair means have far lower variance
+    # than single games.
+    pair_means = scores.reshape(-1, 2).mean(axis=1)
+    t_stat, p_t = stats.ttest_1samp(pair_means, 0)
+    p_wins   = int((pair_means > 0).sum())
+    p_losses = int((pair_means < 0).sum())
+    binom    = stats.binomtest(p_wins, max(1, p_wins + p_losses),
+                               p=0.5, alternative='two-sided')
+    p_sign   = binom.pvalue
 
     win_rate = wins / n_eff if n_eff > 0 else float('nan')
     lo, hi   = _wilson_ci(wins, n_eff)
@@ -121,12 +124,13 @@ def print_stats(K_c, N_c, scores):
         return '***' if p < 0.001 else '**' if p < 0.01 else '*' if p < 0.05 else 'ns'
 
     print(f"\nChallenger  K={K_c:2d}  N={N_c}  vs  Baseline K={BASELINE_K} N={BASELINE_N}")
-    print(f"  Games : {n}  wins={wins}  losses={losses}  ties={ties}")
-    print(f"  Win%  : {100*win_rate:.1f}%  95% CI [{100*lo:.1f}%, {100*hi:.1f}%]")
-    print(f"  Score : mean={scores.mean():+.1f}  sd={scores.std():.1f}"
-          f"  (range {scores.min():.0f}..{scores.max():.0f})")
-    print(f"  t-test: t={t_stat:+.3f}  p={p_t:.4f}  {sig(p_t)}")
-    print(f"  sign  : p={p_sign:.4f}  {sig(p_sign)}")
+    print(f"  Games : {n} ({len(pair_means)} swapped-deal pairs)"
+          f"  wins={wins}  losses={losses}  ties={ties}")
+    print(f"  Win%  : {100*win_rate:.1f}%  95% CI [{100*lo:.1f}%, {100*hi:.1f}%]  (per game)")
+    print(f"  Score : mean={scores.mean():+.1f}  sd(game)={scores.std():.1f}"
+          f"  sd(pair mean)={pair_means.std():.1f}")
+    print(f"  t-test: t={t_stat:+.3f}  p={p_t:.4f}  {sig(p_t)}  (on pair means)")
+    print(f"  sign  : p={p_sign:.4f}  {sig(p_sign)}  (pairs {p_wins}W/{p_losses}L)")
     sys.stdout.flush()
 
 

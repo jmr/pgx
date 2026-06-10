@@ -1,6 +1,11 @@
 """
 Arena: V-MCTS challenger vs random-rollout baseline.
 
+Games run as swapped-deal pairs: each deal is played twice with the teams
+exchanged, and the significance tests run on per-pair mean scores. This
+cancels deal-strength variance (which dominates single-game scores) and
+the forehand advantage.
+
 Library usage (e.g. from Colab):
     from pgx._src.games.jass_v_arena import run_arena
     scores = run_arena(params, k_v=64, games=200, hours=1)
@@ -66,32 +71,30 @@ def play_game(agent_a, agent_b, key):
 # ── Matchup runner ─────────────────────────────────────────────────────────────
 
 def _run_matchup(challenger, baseline, max_games: int, time_budget_s: float, seed: int = 0):
-    """Run challenger vs baseline, alternating which team each plays.
+    """Run challenger vs baseline in swapped-deal pairs.
 
-    Even-indexed games: challenger = team A.
-    Odd-indexed games:  challenger = team B.
-    Score always recorded from the challenger's perspective.
+    Each pair replays the same deal (same PRNG key): challenger as team A in
+    the first game, team B in the second. Score is always recorded from the
+    challenger's perspective. Returned array has even length; consecutive
+    entries (2j, 2j+1) form pair j.
     """
     scores  = []
     key     = jax.random.PRNGKey(seed)
     t_start = time.perf_counter()
 
-    for i in range(max_games):
+    for _ in range(max_games // 2):
         if time.perf_counter() - t_start > time_budget_s:
             break
-        key, subkey = jax.random.split(key)
-        if i % 2 == 0:
-            score = play_game(challenger, baseline, subkey)
-        else:
-            score = -play_game(baseline, challenger, subkey)
-        scores.append(score)
+        key, pair_key = jax.random.split(key)
+        scores.append(play_game(challenger, baseline, pair_key))
+        scores.append(-play_game(baseline, challenger, pair_key))
 
-        if (i + 1) % 20 == 0:
+        if len(scores) % 20 == 0:
             arr = np.array(scores)
             w   = (arr > 0).sum()
             l   = (arr < 0).sum()
             elapsed = time.perf_counter() - t_start
-            print(f"  [{i+1:4d}]  wins={w}  losses={l}  mean={arr.mean():+.1f}"
+            print(f"  [{len(scores):4d}]  wins={w}  losses={l}  mean={arr.mean():+.1f}"
                   f"  ({elapsed:.0f}s elapsed)", flush=True)
 
     return np.array(scores)
@@ -118,22 +121,31 @@ def print_stats(label_c: str, label_b: str, scores: np.ndarray):
     ties   = n - wins - losses
     n_eff  = wins + losses
 
-    t_stat, p_t = stats.ttest_1samp(scores, 0)
-    binom        = stats.binomtest(wins, n_eff, p=0.5, alternative="two-sided")
-    p_sign       = binom.pvalue
-    win_rate     = wins / n_eff if n_eff > 0 else float("nan")
-    lo, hi       = _wilson_ci(wins, n_eff)
+    # Inference on per-pair means: the two same-deal games cancel deal
+    # strength and forehand advantage, so pair means have far lower variance
+    # than single games.
+    pair_means = scores.reshape(-1, 2).mean(axis=1)
+    t_stat, p_t = stats.ttest_1samp(pair_means, 0)
+    p_wins   = int((pair_means > 0).sum())
+    p_losses = int((pair_means < 0).sum())
+    binom    = stats.binomtest(p_wins, max(1, p_wins + p_losses),
+                               p=0.5, alternative="two-sided")
+    p_sign   = binom.pvalue
+
+    win_rate = wins / n_eff if n_eff > 0 else float("nan")
+    lo, hi   = _wilson_ci(wins, n_eff)
 
     def sig(p):
         return "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "ns"
 
     print(f"\nChallenger  {label_c}  vs  Baseline  {label_b}")
-    print(f"  Games : {n}  wins={wins}  losses={losses}  ties={ties}")
-    print(f"  Win%  : {100*win_rate:.1f}%  95% CI [{100*lo:.1f}%, {100*hi:.1f}%]")
-    print(f"  Score : mean={scores.mean():+.1f}  sd={scores.std():.1f}"
-          f"  (range {scores.min():.0f}..{scores.max():.0f})")
-    print(f"  t-test: t={t_stat:+.3f}  p={p_t:.4f}  {sig(p_t)}")
-    print(f"  sign  : p={p_sign:.4f}  {sig(p_sign)}")
+    print(f"  Games : {n} ({len(pair_means)} swapped-deal pairs)"
+          f"  wins={wins}  losses={losses}  ties={ties}")
+    print(f"  Win%  : {100*win_rate:.1f}%  95% CI [{100*lo:.1f}%, {100*hi:.1f}%]  (per game)")
+    print(f"  Score : mean={scores.mean():+.1f}  sd(game)={scores.std():.1f}"
+          f"  sd(pair mean)={pair_means.std():.1f}")
+    print(f"  t-test: t={t_stat:+.3f}  p={p_t:.4f}  {sig(p_t)}  (on pair means)")
+    print(f"  sign  : p={p_sign:.4f}  {sig(p_sign)}  (pairs {p_wins}W/{p_losses}L)")
     sys.stdout.flush()
 
 

@@ -94,21 +94,27 @@ def make_train_step(model: ValueNet, optimizer: optax.GradientTransformation):
 
 def train_model(
     *,
+    collect_fn=None,
     batch_size: int = 8192,
     num_epochs: int = 1000,
     lr: float = 3e-4,
     print_every: int = 100,
     seed: int = 0,
 ) -> tuple:
-    """Train a ValueNet from scratch on random self-play.
+    """Train a ValueNet from scratch on self-play data.
 
-    Each epoch generates a fresh batch of random games as training data.
+    Each epoch generates a fresh batch of games as training data.
     A fixed holdout set (same size) is collected once up front for eval.
 
     The defaults are the canonical V0 settings (eval loss plateaus around
     epoch 500); see docs/jass_plan.md Step 0.
 
     Args:
+        collect_fn: Data generator with the same signature and return as
+            jass_selfplay.collect_batch: (key, batch_size) → (cm, hd,
+            labels, alive). Defaults to collect_batch (uniform-random
+            play). For generation ≥1 pass a V-guided generator, e.g.
+            jass_selfplay.make_v_collect_fn(model.apply, prev_params).
         batch_size: Number of games per training batch and holdout set.
         num_epochs: Total training epochs.
         lr: Adam learning rate.
@@ -118,6 +124,8 @@ def train_model(
     Returns:
         (params, model) — trained Flax parameters and the ValueNet instance.
     """
+    if collect_fn is None:
+        collect_fn = collect_batch
     key = jax.random.PRNGKey(seed)
 
     model = ValueNet()
@@ -129,7 +137,7 @@ def train_model(
 
     print("Collecting holdout batch for eval ...")
     key, k_eval = jax.random.split(key)
-    cm_eval, hd_eval, y_eval, alive_eval = collect_batch(k_eval, batch_size)
+    cm_eval, hd_eval, y_eval, alive_eval = collect_fn(k_eval, batch_size)
     cm_eval = cm_eval.reshape(-1, 36, 12)
     hd_eval = hd_eval.reshape(-1, 20)
     y_eval = y_eval.reshape(-1)
@@ -139,7 +147,7 @@ def train_model(
     t0 = time.perf_counter()
     for epoch in range(num_epochs):
         key, k1 = jax.random.split(key)
-        cm, hd, y, alive = collect_batch(k1, batch_size)
+        cm, hd, y, alive = collect_fn(k1, batch_size)
 
         cm = cm.reshape(-1, 36, 12)
         hd = hd.reshape(-1, 20)

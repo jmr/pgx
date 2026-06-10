@@ -5,9 +5,9 @@ pytest
 pytest-xdist
 matplotlib
 ipython
-# hot fix. to avoid errors in Py3.8
-dm-haiku==0.0.10
+dm-haiku
 pytest-cov
+scipy  # arena stats (scripts/jass_sweep.py, scripts/jass_v_arena.py)
 pgx-minatar
 black
 blackdoc

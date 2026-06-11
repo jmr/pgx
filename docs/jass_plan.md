@@ -7,6 +7,30 @@ This document is the working plan. It is written so that a fresh agent (or a
 human returning after a break) can pick up from any step. Update the **Status**
 markers as work completes; record arena results in the step's **Results** slot.
 
+## Status snapshot (2026-06-12)
+
+**Where we are:** Step 0 done (recorded baseline below). Step 1 generation 1
+trained and arena'd — **the promotion gate came back neutral** (V₁ ≈ V₀).
+We are mid-diagnosis; hypothesis 1 (generator too soft) is already
+eliminated by `policy_match` Q1. **The immediate next action is Q2**
+(V₁-greedy vs V₀-greedy in `policy_match`) — see Step 1 Results for the
+exact cell and the decision branch. Do not train generation 2 until Q2 is
+read.
+
+**Artifacts:** weights live on Drive under `MyDrive/jass/`: `v0.msgpack`,
+`v1.msgpack` (canonical training, 1000 × 8192), plus `v1_ckpt.msgpack*`
+slot files (deletable now that V₁ is finished). Everything through
+`policy_match` is pushed (`main`).
+
+**Colab workflow:** train on TPU; arena/diagnostics on CPU runtime
+(`JAX_PLATFORMS=cpu` — `run_arena` is dispatch-bound; `policy_match` is
+vmapped and fast anywhere). Update the package with
+`pip install --force-reinstall --no-deps git+<fork>@main`, restart the
+runtime, and verify a newly added symbol exists before burning quota.
+Training survives preemption via `train_model(checkpoint_path=...)`
+pointed at Drive (one checkpoint file per generation; resume = rerun the
+same call).
+
 ## Current state (as of 2026-06-10)
 
 Implemented and tested (65 tests in `tests/test_jass*.py`):
@@ -153,19 +177,40 @@ staleness, exploration temperature).
     so this is a genuine null, not underpowered.
 
   **Debugging hypotheses (in test order):**
-  1. The V₀-greedy generator barely improves on random play (τ=10 too
-     soft relative to V₀'s action-value gaps, or V₀ too noisy to rank
-     actions) → training data ≈ random → V₁ ≈ V₀ expected. Test with
-     `policy_match` (no-search policy arena): V₀-greedy vs random at
-     several temperatures.
+  1. ~~The V₀-greedy generator barely improves on random play~~
+     **ELIMINATED 2026-06-12** by `policy_match` Q1 (256 pairs / 512
+     games): V₀-greedy(τ=1) vs uniform-random player: **69% wins,
+     +30 pts/game, t=11**; τ=10: 66%, +30, t=11. The generator's play is
+     far better than random and nearly temperature-insensitive in
+     [1, 10] — V₁'s training data was genuinely improved. (Note the
+     uniform-random *player* here is much weaker than the rollout-MCTS
+     arena *baseline*; V₀-greedy beating one while V₀-MCTS loses to the
+     other is consistent.)
   2. One step of 1-ply-greedy policy iteration saturates: V₀-greedy IS
      better than random, but values-under-V₀-greedy-play don't rank
      actions any better at the leaf (shared architecture bias / capacity;
-     cf. Step 0 analysis of correlated bias under argmax). Test: V₁-greedy
-     vs V₀-greedy in policy_match; if also neutral while (1) shows
-     V₀-greedy ≫ random, the improvement operator is too weak — move to
-     search-generated data (mix `best_action` games into collect) and/or
-     Step 2/3 rather than more V-greedy generations.
+     cf. Step 0 analysis of correlated bias under argmax).
+     **Test = Q2, PENDING — the immediate next action:**
+
+     ```python
+     v0_fn = make_v_action_fn(model.apply, v0_params, v_scale=TARGET_SCALE, temperature=1.0)
+     v1_fn = make_v_action_fn(model.apply, v1_params, v_scale=TARGET_SCALE, temperature=1.0)
+     s = policy_match(v1_fn, v0_fn, jax.random.PRNGKey(0), 256)
+     print_stats("V1-greedy", "V0-greedy", np.array(s))
+     ```
+
+     Decision branch:
+     - **Q2 neutral** → greedy expert iteration is saturated despite
+       better data. Stop V-greedy generations. Options, in preference
+       order: (a) mix search-generated games into the training data
+       (`best_action` self-play; slow per-game — generate offline/CPU at
+       modest counts and mix with V-greedy data), (b) proceed to Step 2
+       (policy head) + Step 3 (PUCT), where search supplies the
+       improvement operator — this is the AlphaZero answer.
+     - **Q2 clearly positive** → V₁ is a better *policy* but not a better
+       *MCTS leaf* — investigate the leaf-eval path specifically
+       (determinized-state distribution shift vs self-play states; sign
+       conventions; K-aggregation), before training anything.
   3. Not yet done and relevant regardless: suit-permutation augmentation
      (task 2) and replay-buffer mixing (task 3).
 

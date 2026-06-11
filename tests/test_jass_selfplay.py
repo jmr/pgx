@@ -1,7 +1,13 @@
 import jax
 import jax.numpy as jnp
 
-from pgx._src.games.jass_selfplay import collect_batch, make_v_collect_fn
+from pgx._src.games.jass_selfplay import (
+    collect_batch,
+    make_v_action_fn,
+    make_v_collect_fn,
+    policy_match,
+    random_action_fn,
+)
 from pgx._src.games.jass_value_net import TARGET_SCALE, ValueNet
 
 
@@ -64,6 +70,29 @@ def test_v_collect_fn_deterministic_and_param_sensitive():
     # Different weights play differently (low temperature, same key/deals).
     c = f2(jax.random.PRNGKey(0), B)
     assert not all(jnp.array_equal(x, y) for x, y in zip(a, c))
+
+
+def test_policy_match_random_vs_random_is_balanced():
+    scores = policy_match(random_action_fn, random_action_fn,
+                          jax.random.PRNGKey(0), 128)
+    assert scores.shape == (256,)
+    # Same policy on both sides: no edge beyond pair-cancelled noise.
+    pair_means = scores.reshape(-1, 2).mean(axis=1)
+    assert abs(float(pair_means.mean())) < 15.0
+    # Scores are valid differentials.
+    assert jnp.all(jnp.abs(scores) <= 157)
+
+
+def test_policy_match_v_policy_runs_and_is_deterministic():
+    model = ValueNet()
+    params = model.init(jax.random.PRNGKey(1),
+                        jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
+    v_fn = make_v_action_fn(model.apply, params, v_scale=TARGET_SCALE,
+                            temperature=1.0)
+    a = policy_match(v_fn, random_action_fn, jax.random.PRNGKey(0), 4)
+    b = policy_match(v_fn, random_action_fn, jax.random.PRNGKey(0), 4)
+    assert a.shape == (8,)
+    assert jnp.array_equal(a, b)
 
 
 def test_v_collect_matches_random_play_distribution_contract():

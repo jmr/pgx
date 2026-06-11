@@ -139,7 +139,35 @@ rollout baseline. If generation 2 does not beat generation 1, **debug here**
 before adding anything (check: data distribution shift, target scale, buffer
 staleness, exploration temperature).
 
-**Results:** _(per-generation arena output here)_
+**Results:**
+
+- **2026-06-12, generation 1 — GATE FAILED (neutral).** V₁ trained with
+  canonical settings (1000 epochs × 8192, ~5.7 s/epoch on 1×1 v5 TPU;
+  train/eval loss 0.124/0.127, fairly flat by 1000) on V₀-greedy data
+  (`make_v_collect_fn`, temperature=10).
+  - V₁ vs rollout K=8 N=8 (yardstick, seed 0, 100 games / 50 pairs):
+    win 32%, mean −31.1, sd(game)=65, sd(pair mean)=32.7, t=−6.66.
+    Nominally 6.4 pts better than V₀'s −37.5 but within noise.
+  - V₁ vs V₀ (gate, K=64 vs K=64, 100 games / 50 pairs): **49 wins,
+    mean −2.5, sd(pair mean)=23.8, t=−0.7 — neutral.** Power was ~±9 pts,
+    so this is a genuine null, not underpowered.
+
+  **Debugging hypotheses (in test order):**
+  1. The V₀-greedy generator barely improves on random play (τ=10 too
+     soft relative to V₀'s action-value gaps, or V₀ too noisy to rank
+     actions) → training data ≈ random → V₁ ≈ V₀ expected. Test with
+     `policy_match` (no-search policy arena): V₀-greedy vs random at
+     several temperatures.
+  2. One step of 1-ply-greedy policy iteration saturates: V₀-greedy IS
+     better than random, but values-under-V₀-greedy-play don't rank
+     actions any better at the leaf (shared architecture bias / capacity;
+     cf. Step 0 analysis of correlated bias under argmax). Test: V₁-greedy
+     vs V₀-greedy in policy_match; if also neutral while (1) shows
+     V₀-greedy ≫ random, the improvement operator is too weak — move to
+     search-generated data (mix `best_action` games into collect) and/or
+     Step 2/3 rather than more V-greedy generations.
+  3. Not yet done and relevant regardless: suit-permutation augmentation
+     (task 2) and replay-buffer mixing (task 3).
 
 ## Step 2 — Add the policy head  [Status: TODO]
 

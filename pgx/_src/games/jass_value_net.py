@@ -14,7 +14,6 @@ Usage:
     pred = model.apply(params, cm, hd)   # (B,) predicted differential / scale
 """
 
-import os
 import time
 
 import flax.linen as nn
@@ -94,12 +93,37 @@ def make_train_step(model: ValueNet, optimizer: optax.GradientTransformation):
 # ── Training ──────────────────────────────────────────────────────────────────
 
 
-def _save_checkpoint(path, params, opt_state, next_epoch: int):
-    """Atomically write (params, opt_state, next_epoch) to path."""
-    tmp = path + ".tmp"
-    with open(tmp, "wb") as f:
+# Checkpoint I/O uses only open(): some environments (e.g. colab with
+# mounted/remote storage) monkey-patch open() for special paths but not
+# os.replace / os.path.exists, so atomic-rename tricks are unavailable.
+# Instead, writes alternate between two slot files — an interrupted write
+# can corrupt at most the slot being written, never the previous good one —
+# and the loader picks the newest slot that deserializes.
+_CKPT_SLOTS = (".a", ".b")
+
+
+def _save_checkpoint(path, params, opt_state, next_epoch: int, slot: int):
+    """Write (params, opt_state, next_epoch) to one of the two slot files."""
+    with open(path + _CKPT_SLOTS[slot % 2], "wb") as f:
         f.write(flax.serialization.to_bytes((params, opt_state, next_epoch)))
-    os.replace(tmp, path)
+
+
+def _load_checkpoint(path, template):
+    """Return the newest readable checkpoint among the slot files, or None.
+
+    Also tries the bare path ("" suffix) for checkpoints written by older
+    single-file code or by hand.
+    """
+    best = None
+    for suffix in _CKPT_SLOTS + ("",):
+        try:
+            with open(path + suffix, "rb") as f:
+                cand = flax.serialization.from_bytes(template, f.read())
+        except Exception:  # missing, partially written, or corrupt slot
+            continue
+        if best is None or cand[2] > best[2]:
+            best = cand
+    return best
 
 
 def train_model(
@@ -133,11 +157,12 @@ def train_model(
         print_every: Print train/eval loss every N epochs.
         seed: PRNG seed for reproducibility.
         checkpoint_path: If given, (params, opt_state, epoch) is written
-            here every checkpoint_every epochs (atomically; put it on
-            Drive in colab). If the file already exists, training RESUMES
-            from it: the RNG stream is fast-forwarded so the resumed run
-            consumes the same data sequence as an uninterrupted one and
-            produces identical final weights. Resume assumes the same
+            to checkpoint_path + ".a"/".b" (alternating) every
+            checkpoint_every epochs; put it on Drive in colab. If a
+            readable checkpoint exists there, training RESUMES from the
+            newest one: the RNG stream is fast-forwarded so the resumed
+            run consumes the same data sequence as an uninterrupted one
+            and produces identical final weights. Resume assumes the same
             collect_fn / batch_size / lr / seed as the interrupted run.
         checkpoint_every: Checkpoint interval in epochs.
 
@@ -156,12 +181,11 @@ def train_model(
     step_fn = make_train_step(model, optimizer)
 
     start_epoch = 0
-    if checkpoint_path is not None and os.path.exists(checkpoint_path):
-        with open(checkpoint_path, "rb") as f:
-            params, opt_state, start_epoch = flax.serialization.from_bytes(
-                (params, opt_state, 0), f.read()
-            )
-        print(f"Resuming from {checkpoint_path} at epoch {start_epoch}\n")
+    if checkpoint_path is not None:
+        loaded = _load_checkpoint(checkpoint_path, (params, opt_state, 0))
+        if loaded is not None:
+            params, opt_state, start_epoch = loaded
+            print(f"Resuming from {checkpoint_path} at epoch {start_epoch}\n")
 
     print("Collecting holdout batch for eval ...")
     key, k_eval = jax.random.split(key)
@@ -195,7 +219,8 @@ def train_model(
                   f"  ({elapsed:.0f}s)")
 
         if checkpoint_path is not None and (epoch + 1) % checkpoint_every == 0:
-            _save_checkpoint(checkpoint_path, params, opt_state, epoch + 1)
+            _save_checkpoint(checkpoint_path, params, opt_state, epoch + 1,
+                             slot=(epoch + 1) // checkpoint_every)
 
     return params, model
 

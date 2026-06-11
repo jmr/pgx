@@ -7,8 +7,13 @@ cancels deal-strength variance (which dominates single-game scores) and
 the forehand advantage.
 
 Library usage (e.g. from Colab):
-    from pgx._src.games.jass_v_arena import run_arena
-    scores = run_arena(params, k_v=64, games=200, hours=1)
+    from pgx._src.games.jass_v_arena import run_arena, run_batched_arena
+    scores = run_arena(params, k_v=64, games=200, hours=1)   # CPU
+    scores = run_batched_arena(params, k_v=64, games=200)    # TPU/GPU
+
+run_arena plays one game at a time (two host syncs per move — fine on CPU,
+dispatch-bound on accelerators); run_batched_arena plays whole chunks of
+games in lockstep inside jit and is the right harness on TPU/GPU.
 
 CLI usage:
     python scripts/jass_v_arena.py --weights jass_v_weights.msgpack
@@ -23,7 +28,8 @@ import numpy as np
 from scipy import stats
 
 from pgx._src.games.jass import DECLARE_OFFSET, Game
-from pgx._src.games.jass_mcts import best_action
+from pgx._src.games.jass_mcts import best_action, make_search_action_fn
+from pgx._src.games.jass_selfplay import policy_match
 from pgx._src.games.jass_value_net import TARGET_SCALE, ValueNet
 
 _game = Game()
@@ -217,6 +223,79 @@ def run_arena(params, *, baseline_params=None, k_v=64, k_base=8, n_base=8,
                           max_games=games,
                           time_budget_s=hours * 3600,
                           seed=seed)
+    print_stats(label_c, label_b, scores)
+    print(f"\nTotal elapsed: {(time.perf_counter()-t0)/60:.1f} minutes")
+    return scores
+
+
+def run_batched_arena(params, *, baseline_params=None, k_v=64, k_base=8,
+                      n_base=8, games=100, chunk_pairs=25, seed=0):
+    """Batched drop-in for run_arena: same matchups, vmapped execution.
+
+    All games in a chunk run in lockstep inside one jitted call (vmap over
+    games, lax.scan over plies). Both agents' searches are evaluated on every
+    board each ply and the move is selected by seat parity — 2× the per-move
+    compute of run_arena, but ~chunk_pairs×2 parallelism with zero per-move
+    dispatch, so it is the right harness on TPU/GPU (run_arena is
+    dispatch-bound there). Same swapped-deal pairing and statistics.
+
+    Note: identical seeds do NOT reproduce run_arena's games (different key
+    plumbing), only the same kind of experiment.
+
+    Args:
+        params:  Flax parameter tree for the challenger's ValueNet.
+        baseline_params: Optional ValueNet params for a V-MCTS baseline
+            (K=k_base, N=1). None = random-rollout baseline (K=k_base,
+            N=n_base).
+        k_v:     Determinizations for the V-MCTS challenger.
+        k_base:  Determinizations for the baseline.
+        n_base:  Rollouts per action for the random-rollout baseline.
+        games:   Total games (= 2 × number of swapped-deal pairs).
+        chunk_pairs: Pairs per jitted call. Larger = more parallelism and
+            memory; progress prints once per chunk.
+        seed:    PRNG seed.
+
+    Returns:
+        np.ndarray of per-game score differentials from the challenger's
+        perspective, pair-adjacent (even length).
+    """
+    model = ValueNet()
+    challenger_fn = make_search_action_fn(
+        num_determinizations=k_v, num_rollouts=1,
+        v_params=params, v_apply=model.apply, v_scale=TARGET_SCALE)
+    label_c = f"V-MCTS K={k_v}"
+    if baseline_params is None:
+        baseline_fn = make_search_action_fn(
+            num_determinizations=k_base, num_rollouts=n_base)
+        label_b = f"random K={k_base} N={n_base}"
+    else:
+        baseline_fn = make_search_action_fn(
+            num_determinizations=k_base, num_rollouts=1,
+            v_params=baseline_params, v_apply=model.apply,
+            v_scale=TARGET_SCALE)
+        label_b = f"V-MCTS K={k_base} (baseline weights)"
+
+    print(f"Challenger : {label_c}")
+    print(f"Baseline   : {label_b}")
+    print(f"Games      : {games} in chunks of {chunk_pairs} pairs\n", flush=True)
+
+    num_pairs = games // 2
+    key = jax.random.PRNGKey(seed)
+    chunks = []
+    played_pairs = 0
+    t0 = time.perf_counter()
+    while played_pairs < num_pairs:
+        n = min(chunk_pairs, num_pairs - played_pairs)
+        key, chunk_key = jax.random.split(key)
+        s = np.asarray(policy_match(challenger_fn, baseline_fn, chunk_key, n))
+        chunks.append(s)
+        played_pairs += n
+        arr = np.concatenate(chunks)
+        w, l = (arr > 0).sum(), (arr < 0).sum()
+        print(f"  [{len(arr):4d}]  wins={w}  losses={l}  mean={arr.mean():+.1f}"
+              f"  ({time.perf_counter()-t0:.0f}s elapsed)", flush=True)
+
+    scores = np.concatenate(chunks)
     print_stats(label_c, label_b, scores)
     print(f"\nTotal elapsed: {(time.perf_counter()-t0)/60:.1f} minutes")
     return scores

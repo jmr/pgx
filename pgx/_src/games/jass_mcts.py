@@ -170,8 +170,7 @@ def _random_rollout(state: GameState, key: Array) -> Array:
 # Main policy
 
 
-@functools.partial(jax.jit, static_argnames=("num_determinizations", "num_rollouts", "v_apply"))
-def best_action(
+def _action_scores(
     state: GameState,
     player_id: Array,
     key: Array,
@@ -180,40 +179,13 @@ def best_action(
     v_params=None,
     v_apply=None,
     v_scale: float = 100.0,
-) -> Array:
-    """Return the action with the best estimated score.
-
-    Two evaluation modes, selected by whether ``v_apply`` is provided:
-
-    **Random rollouts** (``v_apply=None``, default):
-      For each of K determinizations × A actions, run N random rollouts and
-      average ``player_id``'s reward.
-
-    **Value network** (``v_apply`` provided):
-      For each of K determinizations × A actions, evaluate V(next_state) once.
-      No rollout dimension — N collapses to 1. Recommended K=64, N=1 for
-      matched wall-clock with the random-rollout K=8, N=8 baseline.
-
-    JIT-compiled: ``num_determinizations``, ``num_rollouts``, and ``v_apply``
-    are static (they determine array shapes and code paths).
-
-    Args:
-        state: Current game state as returned by the pgx environment.
-        player_id: The acting player (should equal ``state.current_player``).
-        key: JAX PRNG key consumed by this call.
-        num_determinizations: Number of sampled worlds (K).
-        num_rollouts: Random rollouts per (world, action) pair (N). Ignored
-            when ``v_apply`` is provided.
-        v_params: Flax params pytree for the value network. Required when
-            ``v_apply`` is provided.
-        v_apply: ``model.apply`` callable. When not None, V-based evaluation
-            is used instead of random rollouts. Static — different callables
-            produce different JIT traces.
-        v_scale: Multiply V output by this to recover raw score differential.
-            Must match the scale used during training (default 100.0).
+) -> tuple[Array, Array]:
+    """Estimate a score for every action; see best_action for the two modes.
 
     Returns:
-        Scalar int32 action index.
+        (scores, mask): (A,) float32 mean score per action averaged over
+        determinizations (garbage in illegal slots), and the (A,) bool
+        legal-action mask.
     """
     K = num_determinizations
     N = num_rollouts
@@ -259,6 +231,98 @@ def best_action(
         eval_over_dets    = jax.vmap(eval_over_actions, in_axes=(0, None, 0))
         det_action_scores = eval_over_dets(det_states, actions, rollout_keys)  # (K, A)
 
-    mean_scores   = det_action_scores.mean(axis=0)               # (A,)
-    masked_scores = jnp.where(mask, mean_scores, jnp.float32(-jnp.inf))
+    return det_action_scores.mean(axis=0), mask                  # (A,), (A,)
+
+
+@functools.partial(jax.jit, static_argnames=("num_determinizations", "num_rollouts", "v_apply"))
+def best_action(
+    state: GameState,
+    player_id: Array,
+    key: Array,
+    num_determinizations: int = 32,
+    num_rollouts: int = 8,
+    v_params=None,
+    v_apply=None,
+    v_scale: float = 100.0,
+) -> Array:
+    """Return the action with the best estimated score.
+
+    Two evaluation modes, selected by whether ``v_apply`` is provided:
+
+    **Random rollouts** (``v_apply=None``, default):
+      For each of K determinizations × A actions, run N random rollouts and
+      average ``player_id``'s reward.
+
+    **Value network** (``v_apply`` provided):
+      For each of K determinizations × A actions, evaluate V(next_state) once.
+      No rollout dimension — N collapses to 1. Recommended K=64, N=1 for
+      matched wall-clock with the random-rollout K=8, N=8 baseline.
+
+    JIT-compiled: ``num_determinizations``, ``num_rollouts``, and ``v_apply``
+    are static (they determine array shapes and code paths).
+
+    Args:
+        state: Current game state as returned by the pgx environment.
+        player_id: The acting player (should equal ``state.current_player``).
+        key: JAX PRNG key consumed by this call.
+        num_determinizations: Number of sampled worlds (K).
+        num_rollouts: Random rollouts per (world, action) pair (N). Ignored
+            when ``v_apply`` is provided.
+        v_params: Flax params pytree for the value network. Required when
+            ``v_apply`` is provided.
+        v_apply: ``model.apply`` callable. When not None, V-based evaluation
+            is used instead of random rollouts. Static — different callables
+            produce different JIT traces.
+        v_scale: Multiply V output by this to recover raw score differential.
+            Must match the scale used during training (default 100.0).
+
+    Returns:
+        Scalar int32 action index.
+    """
+    scores, mask = _action_scores(
+        state, player_id, key, num_determinizations, num_rollouts,
+        v_params, v_apply, v_scale,
+    )
+    masked_scores = jnp.where(mask, scores, jnp.float32(-jnp.inf))
     return jnp.argmax(masked_scores).astype(jnp.int32)
+
+
+def make_search_action_fn(
+    num_determinizations: int = 8,
+    num_rollouts: int = 8,
+    v_params=None,
+    v_apply=None,
+    v_scale: float = 100.0,
+    temperature: float = None,
+):
+    """Wrap the determinized search as an ``action_fn(state, key) → action``.
+
+    The returned function has the contract expected by
+    ``jass_selfplay.policy_match`` / ``_collect``: the acting player is taken
+    from ``state.current_player``. With ``temperature=None`` it plays exactly
+    like ``best_action`` (greedy argmax over mean action scores); with
+    ``temperature > 0`` (in points) a legal action is sampled with probability
+    ``softmax(scores / temperature)`` — use this for exploration during
+    search-generated self-play data collection.
+
+    Each call returns a new closure (a fresh jit static arg downstream), so
+    build the action_fn once per agent and reuse it.
+    """
+
+    def action_fn(state: GameState, key: Array) -> Array:
+        if temperature is None:
+            scores, mask = _action_scores(
+                state, state.current_player, key,
+                num_determinizations, num_rollouts, v_params, v_apply, v_scale,
+            )
+            masked = jnp.where(mask, scores, jnp.float32(-jnp.inf))
+            return jnp.argmax(masked).astype(jnp.int32)
+        k_search, k_sample = jax.random.split(key)
+        scores, mask = _action_scores(
+            state, state.current_player, k_search,
+            num_determinizations, num_rollouts, v_params, v_apply, v_scale,
+        )
+        logits = jnp.where(mask, scores / temperature, jnp.float32(-1e9))
+        return jax.random.categorical(k_sample, logits).astype(jnp.int32)
+
+    return action_fn

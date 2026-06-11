@@ -47,6 +47,7 @@ Implemented and tested (65 tests in `tests/test_jass*.py`):
 | V wired into `best_action` as leaf evaluator | `jass_mcts.py` (`v_apply`/`v_params`/`v_scale`) | replaces N rollouts with one V(next_state) call; K=64, N=1 recommended |
 | K/N sweep harness | `scripts/jass_sweep.py` | found K≥8 indistinguishable, K=4 worse → random rollouts are the ceiling |
 | V-MCTS vs rollout arena | `pgx/_src/games/jass_v_arena.py` (`run_arena()`, colab-friendly; `scripts/jass_v_arena.py` is a thin CLI wrapper) | swapped-deal pairs; paired t-test + sign test on pair means, Wilson 95% CI |
+| Batched arena (TPU/GPU) | `run_batched_arena()` in `jass_v_arena.py`; `make_search_action_fn()` in `jass_mcts.py` | games vmapped in lockstep via `policy_match`; both searches run each ply, seat-parity select |
 
 External reference: `~/Documents/src/JassTheRipper` — a competitive Java DMCTS
 Jass agent. Its `IDEAS.md` documents extensive negative results (see below) and
@@ -154,15 +155,20 @@ Smallest change that adds the missing ingredient. Tasks:
    V-guided generator (DONE). Remaining: verify eval loss plateaus before
    a generation is arena-gated; otherwise gate failures are uninterpretable
    (bad data vs. undertrained net).
-6. **Batched arena (infrastructure).** The arena plays one game at a time
-   with a Python loop and two host syncs per move — dispatch-bound, and
-   pathological on accelerators (measured ~8.5 s/game on a colab 1×1 v5 TPU
-   vs ~0.9 s/game of actual compute on an M-series CPU). Gating runs the
-   arena repeatedly, so batch it: vmap a batch of games in lockstep, one
-   `lax.scan` over plies, evaluate BOTH agents' `best_action` on every
-   board each ply and select by seat parity (2× compute waste, ~100×
-   parallelism, zero per-move dispatch). Until then, run the arena on CPU
-   (`JAX_PLATFORMS=cpu`), not TPU/GPU.
+6. **Batched arena (infrastructure).** DONE (code, 2026-06-12). The old
+   arena plays one game at a time with two host syncs per move —
+   dispatch-bound, pathological on accelerators (~8.5 s/game on a colab
+   1×1 v5 TPU vs ~0.9 s/game of compute on an M-series CPU). Now batched:
+   `make_search_action_fn()` (jass_mcts.py) wraps `best_action` as an
+   `action_fn(state, key)` (greedy, or softmax-sampled with
+   `temperature=` for self-play exploration), and `run_batched_arena()`
+   (jass_v_arena.py) drives it through `policy_match` — games vmapped in
+   lockstep, one `lax.scan` over plies, both agents evaluated each ply,
+   seat-parity select (2× compute waste, chunk-level parallelism, zero
+   per-move dispatch). Same swapped-deal pairing + stats as `run_arena`
+   (but not bitwise the same games for a given seed). Colab validation
+   (reproduce a known result, e.g. V₁-vs-V₀ neutral, and time it on TPU)
+   still pending.
 7. Iterate 2–3 generations.
 
 **Success criterion:** monotone improvement across generations AND beating the

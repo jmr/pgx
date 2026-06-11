@@ -7,6 +7,7 @@ from pgx._src.games.jass_mcts import (
     sample_determinization,
     _random_rollout,
     best_action,
+    make_search_action_fn,
 )
 
 game = Game()
@@ -210,6 +211,46 @@ def test_best_action_with_constant_v():
                          v_apply=v_apply, v_params={})
     assert bool(game.legal_action_mask(state)[action]), \
         f"V-MCTS returned illegal action {int(action)}"
+
+
+# ──────────────────────────────────────────────────
+# make_search_action_fn
+
+
+def test_search_action_fn_greedy_matches_best_action():
+    """temperature=None plays identically to best_action with the same key."""
+    state = _deal(jax.random.PRNGKey(60))
+    state = game.step(state, jnp.int32(DECLARE_OFFSET))
+    fn = make_search_action_fn(num_determinizations=4, num_rollouts=2)
+    for i in range(5):
+        key = jax.random.PRNGKey(i)
+        a = fn(state, key)
+        b = best_action(state, state.current_player, key,
+                        num_determinizations=4, num_rollouts=2)
+        assert int(a) == int(b)
+
+
+def test_search_action_fn_sampled_is_legal():
+    """Temperature sampling only ever returns legal actions."""
+    state = _deal(jax.random.PRNGKey(61))
+    state = game.step(state, jnp.int32(DECLARE_OFFSET))
+    mask = game.legal_action_mask(state)
+    fn = make_search_action_fn(num_determinizations=2, num_rollouts=1,
+                               temperature=10.0)
+    for i in range(10):
+        action = fn(state, jax.random.PRNGKey(i))
+        assert bool(mask[action]), f"illegal action {int(action)} (key {i})"
+
+
+def test_search_action_fn_with_v_leaf():
+    """The V-leaf variant works through the action_fn wrapper."""
+    state = _deal(jax.random.PRNGKey(62))
+    state = game.step(state, jnp.int32(DECLARE_OFFSET))
+    v_apply = lambda params, cm, hd: jnp.zeros(cm.shape[0])
+    fn = make_search_action_fn(num_determinizations=4, num_rollouts=1,
+                               v_params={}, v_apply=v_apply)
+    action = fn(state, jax.random.PRNGKey(0))
+    assert bool(game.legal_action_mask(state)[action])
 
 
 def test_best_action_full_game():

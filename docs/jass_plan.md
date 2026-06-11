@@ -9,13 +9,15 @@ markers as work completes; record arena results in the step's **Results** slot.
 
 ## Status snapshot (2026-06-12)
 
-**Where we are:** Step 0 done (recorded baseline below). Step 1 generation 1
-trained and arena'd — **the promotion gate came back neutral** (V₁ ≈ V₀).
-We are mid-diagnosis; hypothesis 1 (generator too soft) is already
-eliminated by `policy_match` Q1. **The immediate next action is Q2**
-(V₁-greedy vs V₀-greedy in `policy_match`) — see Step 1 Results for the
-exact cell and the decision branch. Do not train generation 2 until Q2 is
-read.
+**Where we are:** Step 0 done (recorded baseline below). Step 1 is **closed
+as a negative result** (2026-06-12): generation 1's promotion gate was
+neutral, and the Q1/Q2 diagnostics localized the failure — the V₀-greedy
+data was genuinely much better than random (Q1: 69%/+30 vs random play),
+yet V₁ improved neither as MCTS leaf (gate) nor as greedy policy (Q2:
+neutral). 1-ply V-greedy expert iteration is saturated; do not run more
+V-greedy generations. **Next: Steps 2–3 (policy head + PUCT), starting
+with the batched search self-play infrastructure** — see the Step 1
+CONCLUSION block for rationale.
 
 **Artifacts:** weights live on Drive under `MyDrive/jass/`: `v0.msgpack`,
 `v1.msgpack` (canonical training, 1000 × 8192), plus `v1_ckpt.msgpack*`
@@ -82,6 +84,11 @@ own analysis identifies as the real levers — are:
 - UCB exploration-constant tuning: wash, because of Q-sum aggregation (above).
 - Further flat-rollout K/N tuning in this repo: our own sweep showed K≥8 is
   indistinguishable; rollout quality, not K or N, is the bottleneck.
+- V-only 1-ply-greedy expert iteration (this repo, Step 1, 2026-06-12):
+  one generation of training on V₀-greedy data left both the MCTS-leaf
+  gate and greedy-policy strength neutral, despite the data being far
+  better than random. Don't retry without changing the improvement
+  operator (search-generated data / PUCT).
 
 ---
 
@@ -186,33 +193,26 @@ staleness, exploration temperature).
      uniform-random *player* here is much weaker than the rollout-MCTS
      arena *baseline*; V₀-greedy beating one while V₀-MCTS loses to the
      other is consistent.)
-  2. One step of 1-ply-greedy policy iteration saturates: V₀-greedy IS
-     better than random, but values-under-V₀-greedy-play don't rank
-     actions any better at the leaf (shared architecture bias / capacity;
-     cf. Step 0 analysis of correlated bias under argmax).
-     **Test = Q2, PENDING — the immediate next action:**
-
-     ```python
-     v0_fn = make_v_action_fn(model.apply, v0_params, v_scale=TARGET_SCALE, temperature=1.0)
-     v1_fn = make_v_action_fn(model.apply, v1_params, v_scale=TARGET_SCALE, temperature=1.0)
-     s = policy_match(v1_fn, v0_fn, jax.random.PRNGKey(0), 256)
-     print_stats("V1-greedy", "V0-greedy", np.array(s))
-     ```
-
-     Decision branch:
-     - **Q2 neutral** → greedy expert iteration is saturated despite
-       better data. Stop V-greedy generations. Options, in preference
-       order: (a) mix search-generated games into the training data
-       (`best_action` self-play; slow per-game — generate offline/CPU at
-       modest counts and mix with V-greedy data), (b) proceed to Step 2
-       (policy head) + Step 3 (PUCT), where search supplies the
-       improvement operator — this is the AlphaZero answer.
-     - **Q2 clearly positive** → V₁ is a better *policy* but not a better
-       *MCTS leaf* — investigate the leaf-eval path specifically
-       (determinized-state distribution shift vs self-play states; sign
-       conventions; K-aggregation), before training anything.
+  2. One step of 1-ply-greedy policy iteration saturates.
+     **CONFIRMED 2026-06-12 by Q2** (`policy_match`, V₁-greedy vs
+     V₀-greedy, τ=1, 256 pairs): **neutral**. So: training data improved
+     a lot (Q1), the trained V did not (Q2 + gate). The improvement
+     operator — not the data pipeline — is the bottleneck; consistent
+     with the Step 0 analysis (correlated net bias dominates at the
+     action-gap scale).
   3. Not yet done and relevant regardless: suit-permutation augmentation
      (task 2) and replay-buffer mixing (task 3).
+
+  **CONCLUSION — Step 1 closed as a negative result (2026-06-12).**
+  V-only 1-ply-greedy expert iteration does not climb in this setting.
+  Do not run more V-greedy generations. The path forward is the
+  AlphaZero structure: search as the improvement operator — Step 2
+  (policy head) + Step 3 (PUCT via mctx), with search-generated training
+  data. Prerequisite infrastructure for both: **batched search self-play**
+  (vmap `best_action` over a batch of games in lockstep scan), which also
+  delivers the batched arena (Step 1 task 6). With the V leaf (K=64, N=1)
+  this is TPU-friendly; rollout leaves are too expensive to batch at
+  scale.
 
 ## Step 2 — Add the policy head  [Status: TODO]
 

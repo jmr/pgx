@@ -334,8 +334,19 @@ small-K rollout MCTS.
   (uniform-over-legal ≈ 1.3; the floor includes irreducible K=8
   determinization noise in the argmax). Quota constraint lifted
   (2026-06-12), so future runs can use bigger corpora / 1k-game arenas
-  freely. Next: gates (a) value head vs V₁ as K=64 leaf, (b)
-  policy-only vs random.
+  freely.
+- **2026-06-12, run 2 gates: (a) PASSED, (b) FAILED.**
+  - Gate (a), PV value head vs V₁ as K=64 leaf (1000 games): **+1.4,
+    t=1.6, p=0.10** — at least V₁'s equal; trunk sharing cost nothing.
+  - Gate (b), policy-only vs uniform random (512 games): τ=1 (samples
+    the raw policy, ~40% mass on the search argmax per CE 0.90):
+    **−0.6, neutral**. Near-greedy τ=0.1: **43.5% wins, −11.2,
+    t=−6.2 — significantly WORSE than random.** Sharpening hurts ⇒
+    errors are confident and correlated (same pathology as the Step 0
+    analysis), not uniform. Diagnostics queued: D1 teacher strength
+    (greedy K=8 V₁-search vs random — never measured), D2 trump-only /
+    cards-only hybrid splits, D3 per-phase top-1 agreement with the
+    search argmax.
 
 ## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: CODE DONE, untrained]
 

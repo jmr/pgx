@@ -25,10 +25,9 @@ Nothing is trained yet — Step 2/3 numbers are all TBD.
 
 1. `pip install mctx` (extra step; not in requirements.txt), update the
    package, verify `from pgx._src.games.jass_puct import puct_action`.
-2. **Validate the batched arena** (cheap, TPU): re-run the V₁-vs-V₀ gate
-   with `run_batched_arena(v1, baseline_params=v0, k_v=64, k_base=64,
-   games=100)` — expect neutral (sequential arena measured −2.5,
-   t=−0.7) and note s/game vs the ~8.5 s/game dispatch-bound number.
+2. ~~Validate the batched arena~~ **DONE 2026-06-12**: V₁-vs-V₀ gate
+   (K=64, 100 games) neutral as expected, ~22 s total on TPU incl.
+   compile (≈40× the sequential arena). See Step 1 task 6 for details.
 3. **Step 2 training run:** search-generated data with the V₁ leaf —
    `make_search_collect_fn(v_apply, v1_params, num_determinizations=8,
    num_rollouts=1, v_scale=TARGET_SCALE, temperature=10.0)` into
@@ -204,9 +203,13 @@ Smallest change that adds the missing ingredient. Tasks:
    lockstep, one `lax.scan` over plies, both agents evaluated each ply,
    seat-parity select (2× compute waste, chunk-level parallelism, zero
    per-move dispatch). Same swapped-deal pairing + stats as `run_arena`
-   (but not bitwise the same games for a given seed). Colab validation
-   (reproduce a known result, e.g. V₁-vs-V₀ neutral, and time it on TPU)
-   still pending.
+   (but not bitwise the same games for a given seed). **VALIDATED on
+   colab TPU 2026-06-12:** V₁-vs-V₀ gate (K=64 both, 100 games, seed 0)
+   reproduced the sequential arena's neutral result, in ~22 s total
+   including compile — vs ~8.5 s/game sequential on the same hardware,
+   ≈40× faster. V-leaf-vs-V-leaf gates at 1000 games are now ~4 min;
+   use `run_batched_arena` for all V-vs-V gating. (Rollout-baseline
+   matchups are heavier per ply — time a small run before scaling.)
 7. Iterate 2–3 generations.
 
 **Success criterion:** monotone improvement across generations AND beating the

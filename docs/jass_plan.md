@@ -220,18 +220,22 @@ staleness, exploration temperature).
   this is TPU-friendly; rollout leaves are too expensive to batch at
   scale.
 
-## Step 2 — Add the policy head  [Status: TODO]
+## Step 2 — Add the policy head  [Status: IN PROGRESS]
 
 Extend `ValueNet` to a joint policy+value net (`jass_value_net.py` docstring
 notes the per-card trunk was designed for this):
 
 - **Card logits (36):** one logit per card from the per-card trunk (Dense(1)
-  on each row before pooling).
+  on each row before pooling). DONE (code, 2026-06-12): `PolicyValueNet`
+  in `jass_value_net.py`, returns `(logits (B,43), value (B,))`.
 - **Trump logits (7):** actions 36–42, from the pooled features + header.
+  DONE (same).
 - Mask illegal actions at the loss and at sampling (mask comes from
   `legal_action_mask`; note the mask is over the *information state*, which is
-  identical across determinizations of the same root).
-- Value head unchanged.
+  identical across determinizations of the same root). DONE at the loss:
+  `make_pv_train_step` (masked cross-entropy + value MSE, `policy_weight`
+  knob).
+- Value head unchanged (structurally identical layers; fresh init).
 
 First uses, before PUCT exists:
 

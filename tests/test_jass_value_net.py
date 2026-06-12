@@ -2,14 +2,83 @@ import os
 
 import jax
 import jax.numpy as jnp
+import optax
 
-from pgx._src.games.jass_value_net import train_model
+from pgx._src.games.jass_value_net import (
+    PolicyValueNet,
+    make_pv_train_step,
+    train_model,
+)
 
 
 def _params_equal(a, b):
     return all(jnp.array_equal(x, y)
                for x, y in zip(jax.tree_util.tree_leaves(a),
                                jax.tree_util.tree_leaves(b)))
+
+
+def test_pv_net_shapes():
+    model = PolicyValueNet()
+    params = model.init(jax.random.PRNGKey(0),
+                        jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
+    cm = jnp.zeros((5, 36, 12), dtype=jnp.bool_)
+    hd = jnp.zeros((5, 20), dtype=jnp.bool_)
+    logits, value = model.apply(params, cm, hd)
+    assert logits.shape == (5, 43)
+    assert value.shape == (5,)
+    assert jnp.all(jnp.isfinite(logits))
+    assert jnp.all(jnp.isfinite(value))
+
+
+def _synthetic_pv_batch(key, n=64):
+    """Random features with a learnable (input-dependent) action/value target."""
+    k1, k2, k3 = jax.random.split(key, 3)
+    cm = jax.random.bernoulli(k1, 0.2, (n, 36, 12))
+    hd = jax.random.bernoulli(k2, 0.3, (n, 20))
+    legal = jnp.zeros((n, 43), dtype=jnp.bool_).at[:, :36].set(True)
+    # Target action: a deterministic function of the input features.
+    target = cm[:, :, 0].argmax(axis=-1)                       # (n,) in [0, 36)
+    pi = jax.nn.one_hot(target, 43)
+    y = jax.random.uniform(k3, (n,), minval=-157, maxval=157)
+    mask = jnp.ones(n, dtype=jnp.float32)
+    return cm, hd, y, pi, legal, mask
+
+
+def test_pv_train_step_learns():
+    model = PolicyValueNet()
+    params = model.init(jax.random.PRNGKey(0),
+                        jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
+    optimizer = optax.adam(3e-3)
+    opt_state = optimizer.init(params)
+    step = make_pv_train_step(model, optimizer)
+
+    batch = _synthetic_pv_batch(jax.random.PRNGKey(1))
+    params, opt_state, loss0, v0, p0 = step(params, opt_state, *batch)
+    for _ in range(200):
+        params, opt_state, loss, v_loss, p_loss = step(params, opt_state, *batch)
+
+    # Overfitting one fixed batch must drive both heads' losses down hard.
+    assert float(p_loss) < 0.5 * float(p0)
+    assert float(v_loss) < 0.5 * float(v0)
+    assert float(loss) < float(loss0)
+
+
+def test_pv_train_step_mask_zeroes_padding():
+    """Padding steps (mask=0) must not contribute to the loss."""
+    model = PolicyValueNet()
+    params = model.init(jax.random.PRNGKey(0),
+                        jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
+    optimizer = optax.adam(1e-3)
+    opt_state = optimizer.init(params)
+    step = make_pv_train_step(model, optimizer)
+
+    cm, hd, y, pi, legal, mask = _synthetic_pv_batch(jax.random.PRNGKey(2), n=32)
+    # Corrupt the second half of the batch and mask it out.
+    y_bad = y.at[16:].set(1e6)
+    mask_half = mask.at[16:].set(0.0)
+    _, _, loss_a, _, _ = step(params, opt_state, cm, hd, y, pi, legal, mask_half)
+    _, _, loss_b, _, _ = step(params, opt_state, cm, hd, y_bad, pi, legal, mask_half)
+    assert jnp.allclose(loss_a, loss_b)
 
 
 def test_checkpoint_resume_is_equivalent(tmp_path):

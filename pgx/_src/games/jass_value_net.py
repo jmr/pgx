@@ -1,17 +1,22 @@
 """
-Value network for Jass.
+Value and policy+value networks for Jass.
 
-Architecture: per-card MLP (weights shared across all 36 rows) → mean-pool
+ValueNet: per-card MLP (weights shared across all 36 rows) → mean-pool
 → concat header → dense head → scalar differential in [-157, 157].
 
-The per-card trunk is permutation-invariant over cards and naturally extends to
-a per-card policy head (one logit per card) without rearchitecting, making the
-transition to a joint value+policy network straightforward.
+PolicyValueNet (docs/jass_plan.md Step 2): same per-card trunk, plus
+- card logits (36): Dense(1) on each card row before pooling;
+- trump logits (7): actions 36–42, from pooled features + header;
+- value head structurally identical to ValueNet's.
 
 Usage:
     model = ValueNet()
     params = model.init(key, jnp.zeros((B, 36, 12)), jnp.zeros((B, 20)))
     pred = model.apply(params, cm, hd)   # (B,) predicted differential / scale
+
+    pv = PolicyValueNet()
+    params = pv.init(key, jnp.zeros((B, 36, 12)), jnp.zeros((B, 20)))
+    logits, value = pv.apply(params, cm, hd)   # (B, 43), (B,)
 """
 
 import time
@@ -22,6 +27,7 @@ import jax
 import jax.numpy as jnp
 import optax
 
+from pgx._src.games.jass import NUM_ACTIONS
 from pgx._src.games.jass_selfplay import collect_batch
 
 # Scale target into roughly [-1, 1] for stable training.
@@ -62,6 +68,58 @@ class ValueNet(nn.Module):
         return x
 
 
+class PolicyValueNet(nn.Module):
+    """Joint policy+value network over the full-information value features.
+
+    The trunk and the value path mirror ValueNet exactly (same shapes, same
+    layer structure), so a PolicyValueNet trained to convergence should be at
+    least as good a leaf evaluator as a ValueNet. The policy covers all 43
+    actions: card plays 0–35 (one logit per card row, computed before
+    pooling so each card's logit sees that card's own features) and trump
+    declarations 36–42 (from the pooled summary + header, where the hand
+    composition and Schiebe context live).
+
+    Logits are unmasked — mask with the legal_action_mask at the loss and
+    at sampling time.
+    """
+    hidden: int = 128
+
+    @nn.compact
+    def __call__(self, cm: jnp.ndarray, hd: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """
+        Args:
+            cm: (B, 36, 12) bool  card matrix
+            hd: (B, 20)     bool  header
+
+        Returns:
+            logits: (B, 43) float32  unmasked action logits
+            value : (B,)    float32  predicted differential / TARGET_SCALE
+        """
+        x = cm.astype(jnp.float32)           # (B, 36, 12)
+
+        x = nn.Dense(self.hidden)(x)          # (B, 36, hidden)
+        x = nn.gelu(x)
+        x = nn.Dense(self.hidden)(x)          # (B, 36, hidden)
+        x = nn.gelu(x)
+
+        card_logits = nn.Dense(1)(x).squeeze(-1)   # (B, 36)
+
+        pooled = x.mean(axis=-2)               # (B, hidden)
+        h = hd.astype(jnp.float32)             # (B, 20)
+        y = jnp.concatenate([pooled, h], axis=-1)  # (B, hidden + 20)
+
+        v = nn.Dense(self.hidden)(y)
+        v = nn.gelu(v)
+        value = nn.Dense(1)(v).squeeze(-1)     # (B,)
+
+        t = nn.Dense(self.hidden)(y)
+        t = nn.gelu(t)
+        trump_logits = nn.Dense(NUM_ACTIONS - 36)(t)  # (B, 7)
+
+        logits = jnp.concatenate([card_logits, trump_logits], axis=-1)  # (B, 43)
+        return logits, value
+
+
 def make_train_step(model: ValueNet, optimizer: optax.GradientTransformation):
     """Return a jit-compiled training step function."""
 
@@ -86,6 +144,49 @@ def make_train_step(model: ValueNet, optimizer: optax.GradientTransformation):
         loss, grads = jax.value_and_grad(loss_fn)(params)
         updates, new_opt_state = optimizer.update(grads, opt_state, params)
         return optax.apply_updates(params, updates), new_opt_state, loss
+
+    return train_step
+
+
+def make_pv_train_step(model: PolicyValueNet,
+                       optimizer: optax.GradientTransformation,
+                       policy_weight: float = 1.0):
+    """Return a jit-compiled training step for the joint policy+value net."""
+
+    @jax.jit
+    def train_step(params, opt_state, cm, hd, y, pi, legal, mask):
+        """
+        Args:
+            params, opt_state: model + optimiser state
+            cm   : (N, 36, 12) bool
+            hd   : (N, 20)     bool
+            y    : (N,)        float32  raw differential targets
+            pi   : (N, 43)     float32  policy targets (one-hot or visit
+                   distribution); must be zero on illegal actions
+            legal: (N, 43)     bool     legal_action_mask per step
+            mask : (N,)        float32  1.0 for alive steps, 0.0 for padding
+
+        Returns:
+            updated params, opt_state, (total, value, policy) losses.
+            Policy cross-entropy is computed over legal actions only
+            (illegal logits forced to -1e9 before log_softmax).
+        """
+        def loss_fn(p):
+            logits, v = model.apply(p, cm, hd)            # (N, 43), (N,)
+            v_sq = (v - y / TARGET_SCALE) ** 2            # (N,)
+            masked_logits = jnp.where(legal, logits, jnp.float32(-1e9))
+            logp = jax.nn.log_softmax(masked_logits, axis=-1)
+            ce = -(pi * logp).sum(axis=-1)                # (N,)
+            denom  = mask.sum().clip(1)
+            v_loss = (v_sq * mask).sum() / denom
+            p_loss = (ce * mask).sum() / denom
+            return v_loss + policy_weight * p_loss, (v_loss, p_loss)
+
+        (loss, (v_loss, p_loss)), grads = jax.value_and_grad(
+            loss_fn, has_aux=True)(params)
+        updates, new_opt_state = optimizer.update(grads, opt_state, params)
+        return (optax.apply_updates(params, updates), new_opt_state,
+                loss, v_loss, p_loss)
 
     return train_step
 

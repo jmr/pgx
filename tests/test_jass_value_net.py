@@ -143,6 +143,13 @@ def test_pv_train_model_round_robins_collect_fns():
     # then epochs alternate a, b, a, b.
     assert calls == ["a", "a", "b", "a", "b"]
 
+    calls.clear()
+    train_pv_model(collect_fn=[gen("a"), gen("b")],
+                   eval_collect_fn=gen("ev"),
+                   batch_size=2, num_epochs=2, print_every=100)
+    # Dedicated holdout generator; rotation untouched.
+    assert calls == ["ev", "a", "b"]
+
 
 def test_pv_checkpoint_resume_is_equivalent(tmp_path):
     ckpt = str(tmp_path / "pv_ckpt.msgpack")

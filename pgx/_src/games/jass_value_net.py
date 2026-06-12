@@ -353,6 +353,7 @@ def train_pv_model(
     *,
     collect_fn=None,
     batch_size: int = 8192,
+    eval_collect_fn=None,
     num_epochs: int = 1000,
     lr: float = 3e-4,
     policy_weight: float = 1.0,
@@ -379,7 +380,11 @@ def train_pv_model(
             epochs round-robin over them, so passing the generators of
             the last few generations mixes their data evenly. Put the
             newest generator first: the eval holdout is collected from
-            the first entry.
+            the first entry (unless eval_collect_fn is given).
+        eval_collect_fn: Optional separate generator for the eval
+            holdout. REQUIRED for honest eval when collect_fn entries
+            return cached (fixed-corpus) batches — otherwise the holdout
+            is data the net trains on.
         batch_size: Number of games per training batch and holdout set.
         num_epochs: Total training epochs.
         lr: Adam learning rate.
@@ -421,7 +426,8 @@ def train_pv_model(
 
     print("Collecting holdout batch for eval ...")
     key, k_eval = jax.random.split(key)
-    eval_batch = _flatten_pv(collect_fns[0](k_eval, batch_size))
+    eval_fn = eval_collect_fn if eval_collect_fn is not None else collect_fns[0]
+    eval_batch = _flatten_pv(eval_fn(k_eval, batch_size))
     print(f"  {int(eval_batch[-1].sum())} labeled positions\n")
 
     t0 = time.perf_counter()

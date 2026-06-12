@@ -7,17 +7,47 @@ This document is the working plan. It is written so that a fresh agent (or a
 human returning after a break) can pick up from any step. Update the **Status**
 markers as work completes; record arena results in the step's **Results** slot.
 
-## Status snapshot (2026-06-12)
+## Status snapshot (2026-06-12, evening)
 
-**Where we are:** Step 0 done (recorded baseline below). Step 1 is **closed
-as a negative result** (2026-06-12): generation 1's promotion gate was
-neutral, and the Q1/Q2 diagnostics localized the failure — the V₀-greedy
-data was genuinely much better than random (Q1: 69%/+30 vs random play),
-yet V₁ improved neither as MCTS leaf (gate) nor as greedy policy (Q2:
-neutral). 1-ply V-greedy expert iteration is saturated; do not run more
-V-greedy generations. **Next: Steps 2–3 (policy head + PUCT), starting
-with the batched search self-play infrastructure** — see the Step 1
-CONCLUSION block for rationale.
+**Where we are:** Step 0 done (recorded baseline below). Step 1 closed as
+a negative result (see its CONCLUSION block; do not run more V-greedy
+generations). **The Step 2–3 infrastructure is now fully coded and
+locally tested (95 tests)**, in atomic commits on `main`: batched search
+arena (`run_batched_arena`), `PolicyValueNet` + masked-CE/MSE loss +
+`train_pv_model` (checkpointing, suit-permutation augmentation on by
+default, generation round-robin replay mixing), search/policy/PUCT data
+generators in the PV contract `(cm, hd, labels, pi, legal, alive)`, and
+determinized PUCT via mctx (`jass_puct.py`, visit-count-sum
+aggregation; sign conventions arena-validated against random play).
+Nothing is trained yet — Step 2/3 numbers are all TBD.
+
+**Next colab session (in order):**
+
+1. `pip install mctx` (extra step; not in requirements.txt), update the
+   package, verify `from pgx._src.games.jass_puct import puct_action`.
+2. **Validate the batched arena** (cheap, TPU): re-run the V₁-vs-V₀ gate
+   with `run_batched_arena(v1, baseline_params=v0, k_v=64, k_base=64,
+   games=100)` — expect neutral (sequential arena measured −2.5,
+   t=−0.7) and note s/game vs the ~8.5 s/game dispatch-bound number.
+3. **Step 2 training run:** search-generated data with the V₁ leaf —
+   `make_search_collect_fn(v_apply, v1_params, num_determinizations=8,
+   num_rollouts=1, v_scale=TARGET_SCALE, temperature=10.0)` into
+   `train_pv_model(...)`. Note search data costs ~8× V-greedy data per
+   game (K=8 × 43 evals/move); start with fewer epochs (e.g. 200–300,
+   watch for the eval-loss plateau) and/or smaller batch; augmentation
+   is on by default. If generation cost dominates, consider adding
+   fixed-corpus reuse to the loop before scaling up.
+4. **Step 2 gates:** (a) joint net's V head as MCTS leaf vs V₁ in
+   `run_batched_arena` (K=64 both) — must not be worse; (b) policy-only
+   vs random via `policy_match(make_policy_action_fn(pv_apply, params),
+   random_action_fn, key, 256)` — must clearly beat random (V₀-greedy
+   managed 69%/+30 in Q1, that's the bar to be in the ballpark of).
+5. **Step 3 loop:** swap the generator for
+   `make_puct_collect_fn(pv_apply, params, num_determinizations=8,
+   num_simulations=64, temperature=1.0)` and re-run the Step 1 loop
+   (gates + replay mixing via the collect_fn list). Tune K/sims to the
+   TPU budget; PUCT data is far more expensive per game than 1-ply
+   search data.
 
 **Artifacts:** weights live on Drive under `MyDrive/jass/`: `v0.msgpack`,
 `v1.msgpack` (canonical training, 1000 × 8192), plus `v1_ckpt.msgpack*`

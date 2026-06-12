@@ -88,7 +88,16 @@ best_action  = argmax(mean(scores, axis=(0, 2)))                          # (A,)
 
 ---
 
-## Option B: UCT with Pre-allocated Tree (future)
+## Option B: UCT with Pre-allocated Tree (implemented via mctx)
+
+> **Implemented 2026-06-12** in `pgx/_src/games/jass_puct.py` (`puct_search`,
+> `puct_action`, `make_puct_*`), following the sketch below with one
+> correction: the discount between consecutive tree nodes is **not** always
+> −1 — trick winners lead the next trick and Schiebe passes to the partner,
+> so consecutive movers can be teammates. The implementation uses a
+> team-aware discount (+1 same team, −1 opposing, 0 at terminal) and takes
+> edge rewards from the parent mover's perspective. Aggregation sums root
+> visit counts across the K determinizations (see Challenges below).
 
 Proper UCT MCTS requires a tree with per-node visit counts and value estimates. In JAX this means pre-allocating fixed-size arrays and using `jax.lax.while_loop` for the MCTS loop.
 

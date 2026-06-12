@@ -3,12 +3,15 @@ import jax.numpy as jnp
 
 from pgx._src.games.jass_selfplay import (
     collect_batch,
+    make_policy_action_fn,
+    make_policy_collect_fn,
+    make_search_collect_fn,
     make_v_action_fn,
     make_v_collect_fn,
     policy_match,
     random_action_fn,
 )
-from pgx._src.games.jass_value_net import TARGET_SCALE, ValueNet
+from pgx._src.games.jass_value_net import TARGET_SCALE, PolicyValueNet, ValueNet
 
 
 B = 4
@@ -93,6 +96,65 @@ def test_policy_match_v_policy_runs_and_is_deterministic():
     b = policy_match(v_fn, random_action_fn, jax.random.PRNGKey(0), 4)
     assert a.shape == (8,)
     assert jnp.array_equal(a, b)
+
+
+def _check_pv_batch(cm, hd, labels, pi, legal, alive):
+    _check_batch(cm, hd, labels, alive)
+    assert pi.shape == (B, T, 43)
+    assert legal.shape == (B, T, 43)
+    assert pi.dtype == jnp.float32
+    assert legal.dtype == jnp.bool_
+    # pi is a distribution supported on legal actions (alive steps only).
+    live = alive[..., None]
+    assert jnp.allclose(jnp.where(alive, pi.sum(-1), 1.0), 1.0)
+    assert not jnp.any((pi > 0) & ~legal & live)
+    # Every alive step has at least one legal action.
+    assert jnp.all(legal.any(-1) | ~alive)
+
+
+def _pv_params(seed=1):
+    model = PolicyValueNet()
+    return model, model.init(jax.random.PRNGKey(seed),
+                             jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
+
+
+def test_search_collect_fn_contract():
+    collect_fn = make_search_collect_fn(num_determinizations=2,
+                                        num_rollouts=1, temperature=10.0)
+    out = collect_fn(jax.random.PRNGKey(0), B)
+    _check_pv_batch(*out)
+    # Greedy search variant too (one-hot pi by construction).
+    greedy_fn = make_search_collect_fn(num_determinizations=2, num_rollouts=1)
+    out = greedy_fn(jax.random.PRNGKey(0), B)
+    _check_pv_batch(*out)
+
+
+def test_search_collect_fn_with_v_leaf():
+    model = ValueNet()
+    params = model.init(jax.random.PRNGKey(1),
+                        jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
+    collect_fn = make_search_collect_fn(model.apply, params,
+                                        num_determinizations=2,
+                                        num_rollouts=1,
+                                        v_scale=TARGET_SCALE)
+    _check_pv_batch(*collect_fn(jax.random.PRNGKey(0), B))
+
+
+def test_policy_collect_fn_contract_and_determinism():
+    model, params = _pv_params()
+    collect_fn = make_policy_collect_fn(model.apply, params)
+    a = collect_fn(jax.random.PRNGKey(0), B)
+    _check_pv_batch(*a)
+    b = collect_fn(jax.random.PRNGKey(0), B)
+    assert all(jnp.array_equal(x, y) for x, y in zip(a, b))
+
+
+def test_policy_action_fn_in_policy_match():
+    model, params = _pv_params()
+    p_fn = make_policy_action_fn(model.apply, params, temperature=1.0)
+    scores = policy_match(p_fn, random_action_fn, jax.random.PRNGKey(0), 4)
+    assert scores.shape == (8,)
+    assert jnp.all(jnp.abs(scores) <= 157)
 
 
 def test_v_collect_matches_random_play_distribution_contract():

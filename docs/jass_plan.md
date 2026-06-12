@@ -240,8 +240,17 @@ notes the per-card trunk was designed for this):
 First uses, before PUCT exists:
 
 - Self-play move sampler (much faster than search-per-move data generation).
+  DONE (code, 2026-06-12): `make_policy_action_fn` (policy-head sampler,
+  also usable in `policy_match` for the success criterion below) and
+  `make_policy_collect_fn` in `jass_selfplay.py`.
 - Policy training target for now: the search agent's chosen action
   (cross-entropy on the argmax), upgraded to visit distributions in Step 3.
+  DONE (code, 2026-06-12): `make_search_collect_fn` (search-played games,
+  one-hot pi targets, optional exploration `temperature=`). PV collect
+  contract: `(cm, hd, labels, pi, legal, alive)`; the general
+  `policy_fn(state, key) → (action, pi)` plumbing (`as_policy_fn`,
+  `_collect_pv`) is what the Step 3 PUCT generator plugs into with
+  visit-distribution pi.
 
 **Success criterion:** joint net's V at least matches Step 1's V in the arena;
 policy-only player (no search) clearly beats random and is in the ballpark of

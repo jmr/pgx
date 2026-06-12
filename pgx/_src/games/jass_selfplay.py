@@ -1,7 +1,7 @@
 """
-Vmapped self-play for Jass value-network training.
+Vmapped self-play for Jass network training.
 
-Two data generators with the same contract:
+Value-only generators (same contract):
 
 collect_batch(key, batch_size)
     Uniform-random play (generation 0).
@@ -17,13 +17,23 @@ Both return (cm, hd, labels, alive):
     labels: (B, T)         f32   acting player's terminal differential
     alive : (B, T)         bool  False once game is terminal (label mask)
 
-Flatten and filter by alive before feeding the trainer:
-    cm    = cm.reshape(-1, 36, 12)[alive.reshape(-1)]
-    hd    = hd.reshape(-1, 20)   [alive.reshape(-1)]
-    labels= labels.reshape(-1)   [alive.reshape(-1)]
+Policy+value generators (for PolicyValueNet, docs/jass_plan.md Step 2+)
+additionally return per-step policy targets and legal masks:
 
-Or pass alive.reshape(-1).astype(jnp.float32) as a sample-weight mask
-to avoid dynamic shapes inside jit.
+make_search_collect_fn(...)(key, batch_size)
+    Determinized-search self-play; policy target = one-hot of the chosen
+    action (upgraded to visit distributions by the PUCT generator, Step 3).
+
+make_policy_collect_fn(pv_apply, pv_params, ...)(key, batch_size)
+    Fast generator: moves sampled from the policy head directly (no search).
+
+Both return (cm, hd, labels, pi, legal, alive):
+    pi    : (B, T, 43)     f32   policy target (zero on illegal actions)
+    legal : (B, T, 43)     bool  legal_action_mask at each step
+
+Flatten and filter by alive before feeding the trainer, or pass
+alive.reshape(-1).astype(jnp.float32) as a sample-weight mask to avoid
+dynamic shapes inside jit.
 """
 
 import functools
@@ -33,6 +43,7 @@ import jax.numpy as jnp
 from jax import Array
 
 from pgx._src.games.jass import Game, NUM_ACTIONS, value_features
+from pgx._src.games.jass_mcts import make_search_action_fn
 
 _game = Game()
 _MAX_STEPS = 38   # 2 trump-selection + 9*4 card-play steps
@@ -163,6 +174,145 @@ def make_v_collect_fn(v_apply, v_params, *, v_scale: float = 100.0,
 
     def collect_fn(key: Array, batch_size: int):
         return _v_collect(v_params, key, batch_size)
+
+    return collect_fn
+
+
+# ── Policy+value collection (PolicyValueNet training data) ────────────────────
+#
+# A policy_fn(state, key) → (action, pi) generalizes action_fn: pi (43,) is
+# the policy training target for the step (one-hot of the chosen action for
+# greedy/sampled players; the aggregated root visit distribution for PUCT).
+
+
+def as_policy_fn(action_fn):
+    """Lift an action_fn(state, key) → action to a policy_fn with one-hot pi."""
+
+    def policy_fn(s, k):
+        action = action_fn(s, k)
+        return action, jax.nn.one_hot(action, NUM_ACTIONS, dtype=jnp.float32)
+
+    return policy_fn
+
+
+def make_policy_action_fn(pv_apply, pv_params, *, temperature: float = 1.0):
+    """Build an action_fn(state, key) that samples from the policy head.
+
+    The policy head is evaluated on the full-information value features of
+    the actual state (self-play states are fully known), illegal logits are
+    masked out, and a legal action is sampled from
+    softmax(logits / temperature).
+
+    Suitable for policy_match diagnostics (Step 2 success criterion:
+    policy-only vs random) and as a fast data generator via
+    make_policy_collect_fn.
+    """
+
+    def action_fn(s, k):
+        cm, hd = value_features(s, s.current_player)
+        logits, _ = pv_apply(pv_params, cm[None], hd[None])
+        mask = _game.legal_action_mask(s)
+        masked = jnp.where(mask, logits[0] / temperature, jnp.float32(-1e9))
+        return jax.random.categorical(k, masked).astype(jnp.int32)
+
+    return action_fn
+
+
+def _play_one_pv(policy_fn, key: Array):
+    """Run one full game with policy_fn; record features, pi, legal, rewards."""
+    init_key, play_key = jax.random.split(key)
+    s0 = _game.init(init_key)
+
+    def step_fn(carry, _):
+        s, k = carry
+        done = s.trick_num >= 9
+
+        k, sk = jax.random.split(k)
+        action, pi = policy_fn(s, sk)
+
+        cm, hd = value_features(s, s.current_player)
+        legal = _game.legal_action_mask(s)
+        out = (cm, hd, pi, legal, s.current_player, ~done)
+
+        ns = _game.step(s, action)
+        ns = jax.tree_util.tree_map(lambda a, b: jnp.where(done, a, b), s, ns)
+        return (ns, k), out
+
+    (final, _), (cm, hd, pi, legal, actor, alive) = jax.lax.scan(
+        step_fn, (s0, play_key), None, length=_MAX_STEPS
+    )
+    rew = _game.rewards(final)  # (4,)
+    return cm, hd, pi, legal, actor, alive, rew
+
+
+def _collect_pv(policy_fn, key: Array, batch_size: int):
+    """Run batch_size games in parallel with policy_fn; label every step."""
+    keys = jax.random.split(key, batch_size)
+    cm, hd, pi, legal, actor, alive, rew = jax.vmap(
+        functools.partial(_play_one_pv, policy_fn)
+    )(keys)
+    labels = jnp.take_along_axis(
+        rew[:, jnp.newaxis, :],   # (B, 1, 4)
+        actor[..., jnp.newaxis],  # (B, T, 1)
+        axis=-1,
+    ).squeeze(-1)                 # (B, T)
+    return cm, hd, labels, pi, legal, alive
+
+
+def make_search_collect_fn(v_apply=None, v_params=None, *,
+                           num_determinizations: int = 8,
+                           num_rollouts: int = 8,
+                           v_scale: float = 100.0,
+                           temperature: float = None):
+    """Build a collect_fn(key, batch_size) playing with determinized search.
+
+    Every seat plays with make_search_action_fn (best_action per move:
+    random-rollout leaves by default, V leaves when v_apply is given;
+    temperature=None is greedy, > 0 samples softmax(scores/temperature) for
+    exploration). The policy target pi is the one-hot of the chosen action
+    — the Step 2 training target, upgraded to visit distributions in Step 3.
+
+    Much more expensive per game than collect_batch / make_v_collect_fn:
+    each move runs K determinizations × A actions of leaf evaluation.
+    Use V leaves (num_rollouts=1) and an accelerator for bulk generation.
+
+    Returns:
+        collect_fn(key, batch_size) → (cm, hd, labels, pi, legal, alive).
+    """
+    @functools.partial(jax.jit, static_argnames=("batch_size",))
+    def _search_collect(params, key: Array, batch_size: int):
+        action_fn = make_search_action_fn(
+            num_determinizations=num_determinizations,
+            num_rollouts=num_rollouts,
+            v_params=params, v_apply=v_apply, v_scale=v_scale,
+            temperature=temperature)
+        return _collect_pv(as_policy_fn(action_fn), key, batch_size)
+
+    def collect_fn(key: Array, batch_size: int):
+        return _search_collect(v_params, key, batch_size)
+
+    return collect_fn
+
+
+def make_policy_collect_fn(pv_apply, pv_params, *, temperature: float = 1.0):
+    """Build a collect_fn(key, batch_size) sampling from the policy head.
+
+    The fast generator (no search): same speed class as make_v_collect_fn.
+    pi is the one-hot of the sampled action, so training the policy head on
+    this data is behavior cloning of the generator itself — useful for the
+    value target mostly; prefer search-generated pi for policy improvement.
+
+    Returns:
+        collect_fn(key, batch_size) → (cm, hd, labels, pi, legal, alive).
+    """
+    @functools.partial(jax.jit, static_argnames=("batch_size",))
+    def _policy_collect(params, key: Array, batch_size: int):
+        action_fn = make_policy_action_fn(pv_apply, params,
+                                          temperature=temperature)
+        return _collect_pv(as_policy_fn(action_fn), key, batch_size)
+
+    def collect_fn(key: Array, batch_size: int):
+        return _policy_collect(pv_params, key, batch_size)
 
     return collect_fn
 

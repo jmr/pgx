@@ -328,6 +328,14 @@ small-K rollout MCTS.
   Practical numbers from this run, same hardware: collection 73 s per
   8192 games; batch 8192 training OOMs a 16G TPU (~13.5G train step +
   ~2G pinned corpus) — use batch 4096 and `jax.device_get` the corpus.
+- **2026-06-12, run 2 (argmax-target fix) — policy head learns.** Corpus
+  24 × 4096 search games (K=8 V₁-leaf, play τ=10, argmax targets),
+  600 epochs: **eval policy CE 1.35 → 0.90, plateau by ~epoch 200**
+  (uniform-over-legal ≈ 1.3; the floor includes irreducible K=8
+  determinization noise in the argmax). Quota constraint lifted
+  (2026-06-12), so future runs can use bigger corpora / 1k-game arenas
+  freely. Next: gates (a) value head vs V₁ as K=64 leaf, (b)
+  policy-only vs random.
 
 ## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: CODE DONE, untrained]
 

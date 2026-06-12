@@ -343,10 +343,29 @@ small-K rollout MCTS.
     **−0.6, neutral**. Near-greedy τ=0.1: **43.5% wins, −11.2,
     t=−6.2 — significantly WORSE than random.** Sharpening hurts ⇒
     errors are confident and correlated (same pathology as the Step 0
-    analysis), not uniform. Diagnostics queued: D1 teacher strength
-    (greedy K=8 V₁-search vs random — never measured), D2 trump-only /
-    cards-only hybrid splits, D3 per-phase top-1 agreement with the
-    search argmax.
+    analysis), not uniform.
+  - **Diagnostics (2026-06-12):** D1 — teacher (greedy K=8 V₁-search) vs
+    random, 512 games: **72.3% wins, +33.7** — the data source is strong;
+    imitation, not data, is the problem. D2 — hybrid splits vs random:
+    trump-only **−2.0 (ns)**, cards-only **−7.7 (p=0.008)** — the card
+    head is the pathology, the trump head is fine.
+  - **ROOT CAUSE (architectural, two layers deep).** (1) Card logits were
+    `Dense(1)` per trunk row, and the trunk processes rows independently —
+    each card's logit saw only that card's own 12 bits: a context-free
+    card priority table, which greedy play executes as a systematic
+    (worse-than-random) bias. The trump head, which gets pooled+header
+    context, was unaffected — exactly matching D2. (2) Deeper: the net
+    had NO card identity — identity lives in row position, invisible to a
+    row-shared trunk + mean pool. No rank/suit information (beyond
+    is-trump) reached policy OR value. **Both fixed 2026-06-12** in
+    `PolicyValueNet`: suit+rank one-hots appended to each row inside the
+    module, and the card head now sees per-card features ⊕ pooled global
+    context. Regression test pins the context path (first-vs-last-held
+    task, unlearnable by the old head). NOTE: ValueNet is left
+    identity-blind for V₀/V₁ artifact compatibility — meaning the entire
+    Step 0/1 value line was rank-blind; the PV value head no longer is,
+    so gate (a) may now beat V₁ rather than match it. Retrain required
+    (same corpus is fine — data is architecture-independent).
 
 ## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: CODE DONE, untrained]
 

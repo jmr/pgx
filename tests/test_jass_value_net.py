@@ -64,6 +64,47 @@ def test_pv_train_step_learns():
     assert float(loss) < float(loss0)
 
 
+def test_pv_card_logits_use_global_context():
+    """Card logits must see global context, not just their own card's row.
+
+    Target: the FIRST held card when header bit 0 is set, else the LAST
+    held card. Per-row-only card logits (the Step 2 run 2 architecture)
+    provably cannot separate these — both targets look identical from the
+    single card's features — and stall at CE ≈ ln 2. With pooled context
+    fed back into the card head this is learnable to near zero.
+    """
+    k1, k2 = jax.random.split(jax.random.PRNGKey(0))
+    n = 256
+    cm = jnp.zeros((n, 36, 12), dtype=jnp.bool_).at[:, :, 0].set(
+        jax.random.bernoulli(k1, 0.25, (n, 36)))
+    cm = cm.at[:, 0, 0].set(True).at[:, 35, 0].set(True)  # ≥2 held cards
+    hd = jnp.zeros((n, 20), dtype=jnp.bool_).at[:, 0].set(
+        jax.random.bernoulli(k2, 0.5, (n,)))
+
+    held = cm[:, :, 0]
+    first = jnp.argmax(held, axis=-1)
+    last = 35 - jnp.argmax(held[:, ::-1], axis=-1)
+    target = jnp.where(hd[:, 0], first, last)
+
+    pi = jax.nn.one_hot(target, 43)
+    legal = jnp.zeros((n, 43), dtype=jnp.bool_).at[:, :36].set(held)
+    y = jnp.zeros(n)
+    mask = jnp.ones(n)
+
+    model = PolicyValueNet()
+    params = model.init(jax.random.PRNGKey(1),
+                        jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
+    optimizer = optax.adam(3e-3)
+    opt_state = optimizer.init(params)
+    step = make_pv_train_step(model, optimizer)
+    for _ in range(400):
+        params, opt_state, _, _, p_loss = step(
+            params, opt_state, cm, hd, y, pi, legal, mask)
+
+    # Context-free card logits bottom out at ~ln 2 ≈ 0.69 on this task.
+    assert float(p_loss) < 0.35, f"policy CE stuck at {float(p_loss):.3f}"
+
+
 def test_pv_train_step_mask_zeroes_padding():
     """Padding steps (mask=0) must not contribute to the loss."""
     model = PolicyValueNet()

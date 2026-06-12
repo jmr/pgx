@@ -27,12 +27,22 @@ import jax
 import jax.numpy as jnp
 import optax
 
-from pgx._src.games.jass import NUM_ACTIONS
+from pgx._src.games.jass import CARD_SUIT, NUM_ACTIONS
 from pgx._src.games.jass_selfplay import (
     augment_suits,
     collect_batch,
     collect_pv_batch,
 )
+
+# Static per-card identity: suit one-hot (4) + rank one-hot (9), (36, 13).
+# The card matrix encodes card identity only by ROW POSITION, which a
+# row-shared trunk + mean pool cannot observe — without this, the net
+# cannot tell a Jack from a six (ranks carry 2–20 points!) and card
+# logits cannot be card-specific. ValueNet (below) predates this and is
+# kept identity-blind for compatibility with the V0/V1 artifacts.
+_CARD_IDENTITY = jnp.concatenate(
+    [jax.nn.one_hot(CARD_SUIT, 4),
+     jax.nn.one_hot(jnp.arange(36) % 9, 9)], axis=-1)
 
 # Scale target into roughly [-1, 1] for stable training.
 # The network outputs pred ≈ differential / SCALE; multiply back at inference.
@@ -78,10 +88,23 @@ class PolicyValueNet(nn.Module):
     The trunk and the value path mirror ValueNet exactly (same shapes, same
     layer structure), so a PolicyValueNet trained to convergence should be at
     least as good a leaf evaluator as a ValueNet. The policy covers all 43
-    actions: card plays 0–35 (one logit per card row, computed before
-    pooling so each card's logit sees that card's own features) and trump
-    declarations 36–42 (from the pooled summary + header, where the hand
-    composition and Schiebe context live).
+    actions: card plays 0–35 and trump declarations 36–42 (from the pooled
+    summary + header, where the hand composition and Schiebe context live).
+
+    Two additions over the naive per-card design, both load-bearing
+    (Step 2 run 2 post-mortem):
+
+    - **Card identity encoding**: suit+rank one-hots are appended to each
+      row inside the module. The card matrix encodes identity only by row
+      position, invisible to a row-shared trunk — without this the net
+      cannot tell a Jack from a six, for the policy OR the value path.
+    - **Global context in the card head**: each card's logit sees its own
+      trunk features concatenated with the pooled summary + header.
+      Without it each logit is a function of one row only — a context-free
+      card priority table. Measured consequence: policy CE still drops to
+      0.90 on marginal statistics, but greedy play of that head is
+      systematically biased and loses to uniform random by 11 pts/game
+      while its search teacher beats random by 34.
 
     Logits are unmasked — mask with the legal_action_mask at the loss and
     at sampling time.
@@ -100,17 +123,25 @@ class PolicyValueNet(nn.Module):
             value : (B,)    float32  predicted differential / TARGET_SCALE
         """
         x = cm.astype(jnp.float32)           # (B, 36, 12)
+        ident = jnp.broadcast_to(_CARD_IDENTITY, x.shape[:-1] + (13,))
+        x = jnp.concatenate([x, ident], axis=-1)   # (B, 36, 25)
 
         x = nn.Dense(self.hidden)(x)          # (B, 36, hidden)
         x = nn.gelu(x)
         x = nn.Dense(self.hidden)(x)          # (B, 36, hidden)
         x = nn.gelu(x)
-
-        card_logits = nn.Dense(1)(x).squeeze(-1)   # (B, 36)
 
         pooled = x.mean(axis=-2)               # (B, hidden)
         h = hd.astype(jnp.float32)             # (B, 20)
         y = jnp.concatenate([pooled, h], axis=-1)  # (B, hidden + 20)
+
+        # Card head: per-card features + broadcast global context.
+        ctx = nn.gelu(nn.Dense(self.hidden)(y))            # (B, hidden)
+        ctx_rows = jnp.broadcast_to(
+            ctx[..., None, :], x.shape[:-1] + (self.hidden,))  # (B, 36, hidden)
+        c = jnp.concatenate([x, ctx_rows], axis=-1)        # (B, 36, 2*hidden)
+        c = nn.gelu(nn.Dense(self.hidden)(c))              # (B, 36, hidden)
+        card_logits = nn.Dense(1)(c).squeeze(-1)           # (B, 36)
 
         v = nn.Dense(self.hidden)(y)
         v = nn.gelu(v)

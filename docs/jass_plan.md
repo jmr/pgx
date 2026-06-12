@@ -7,51 +7,51 @@ This document is the working plan. It is written so that a fresh agent (or a
 human returning after a break) can pick up from any step. Update the **Status**
 markers as work completes; record arena results in the step's **Results** slot.
 
-## Status snapshot (2026-06-12, evening)
+## Status snapshot (2026-06-13)
 
-**Where we are:** Step 0 done (recorded baseline below). Step 1 closed as
-a negative result (see its CONCLUSION block; do not run more V-greedy
-generations). **The Step 2–3 infrastructure is now fully coded and
-locally tested (95 tests)**, in atomic commits on `main`: batched search
-arena (`run_batched_arena`), `PolicyValueNet` + masked-CE/MSE loss +
-`train_pv_model` (checkpointing, suit-permutation augmentation on by
-default, generation round-robin replay mixing), search/policy/PUCT data
-generators in the PV contract `(cm, hd, labels, pi, legal, alive)`, and
-determinized PUCT via mctx (`jass_puct.py`, visit-count-sum
-aggregation; sign conventions arena-validated against random play).
-Nothing is trained yet — Step 2/3 numbers are all TBD.
+**Where we are:** Steps 0–2 done; Step 3 (PUCT expert iteration) is next
+and its code is already in place. Step 1 closed as a negative result
+(see its CONCLUSION; no more V-greedy generations — though the 1k-game
+re-run showed gen 1 was +2.7, small-positive, not strictly neutral).
+**Step 2 closed 2026-06-13 after a productive failure:** the first
+policy head lost to *random* when played greedily, and the post-mortem
+found two architectural holes — card logits without global context, and
+no card identity anywhere (rank/suit live in row position, invisible to
+the row-shared trunk; the whole V₀/V₁ line was rank-blind). With both
+fixed in `PolicyValueNet`: policy CE 0.48, policy-only +9.9 vs random
+(teacher: +33.7), value head **+12.6 over V₁** (first value improvement
+of the project), and the rollout-baseline yardstick moved for the first
+time since Step 0: **PV-MCTS K=64 vs rollout K=8 N=8 = −20.6 ± ~2.5
+(1000 games)**. That is the number generation 1 must beat.
 
-**Next colab session (in order):**
+**Operational facts:** TPU quota constraints are gone (longer runs and
+bigger slices available; code is still single-device — sharding is a
+queued task for when PUCT data generation needs it). V-vs-V arenas:
+1000 games ≈ 1 min; vs-rollout arenas ≈ 1.6 s/game. PV training uses a
+pickled fixed corpus (`corpus_k8_v1_24x4096.pkl` on Drive) + fresh
+eval holdout via `eval_collect_fn`; batch 4096 (8192 OOMs a 16G TPU).
 
-1. `pip install mctx` (extra step; not in requirements.txt), update the
-   package, verify `from pgx._src.games.jass_puct import puct_action`.
-2. ~~Validate the batched arena~~ **DONE 2026-06-12**: V₁-vs-V₀ gate
-   (K=64, 100 games) neutral as expected, ~22 s total on TPU incl.
-   compile (≈40× the sequential arena). See Step 1 task 6 for details.
-3. **Step 2 training run:** search-generated data with the V₁ leaf —
-   `make_search_collect_fn(v_apply, v1_params, num_determinizations=8,
-   num_rollouts=1, v_scale=TARGET_SCALE, temperature=10.0)` into
-   `train_pv_model(...)`. Note search data costs ~8× V-greedy data per
-   game (K=8 × 43 evals/move); start with fewer epochs (e.g. 200–300,
-   watch for the eval-loss plateau) and/or smaller batch; augmentation
-   is on by default. If generation cost dominates, consider adding
-   fixed-corpus reuse to the loop before scaling up.
-4. **Step 2 gates:** (a) joint net's V head as MCTS leaf vs V₁ in
-   `run_batched_arena` (K=64 both) — must not be worse; (b) policy-only
-   vs random via `policy_match(make_policy_action_fn(pv_apply, params),
-   random_action_fn, key, 256)` — must clearly beat random (V₀-greedy
-   managed 69%/+30 in Q1, that's the bar to be in the ballpark of).
-5. **Step 3 loop:** swap the generator for
-   `make_puct_collect_fn(pv_apply, params, num_determinizations=8,
-   num_simulations=64, temperature=1.0)` and re-run the Step 1 loop
-   (gates + replay mixing via the collect_fn list). Tune K/sims to the
-   TPU budget; PUCT data is far more expensive per game than 1-ply
-   search data.
+**Next (Step 3, generation 1):**
 
-**Artifacts:** weights live on Drive under `MyDrive/jass/`: `v0.msgpack`,
-`v1.msgpack` (canonical training, 1000 × 8192), plus `v1_ckpt.msgpack*`
-slot files (deletable now that V₁ is finished). Everything through
-`policy_match` is pushed (`main`).
+1. Optional first: extend run 3 to `num_epochs=1200` (same checkpoint,
+   resumes at 600) and re-gate — policy CE was still falling.
+2. Generate PUCT data with the Step 2 net:
+   `make_puct_collect_fn(pv_model.apply, pv_params,
+   num_determinizations=8, num_simulations=64, temperature=1.0)`.
+   Time a small batch first (PUCT ≈ 1.5–2× the per-game cost of the
+   1-ply search collect); build a corpus, pickle it.
+3. Train generation 1 (fresh `PolicyValueNet`, replay mixing:
+   `collect_fn=[puct_corpus_fns..., step2_corpus_fns...]` newest first).
+4. Gates: gen-1 PV-MCTS vs gen-0 PV-MCTS (K=64, 1000 games, both via
+   `v_apply=`), and the rollout yardstick (beat −20.6). Policy-only vs
+   random should also move toward the teacher number.
+5. Iterate; promote only on a significant gate win (p<0.05).
+
+**Artifacts:** weights on Drive under `MyDrive/jass/`: `v0.msgpack`,
+`v1.msgpack` (canonical ValueNet line, now legacy/rank-blind),
+`pv3_ckpt.msgpack*` slots (Step 2 PolicyValueNet, run 3) — export final
+params to `pv_gen0.msgpack` for clarity. Step 2 corpus:
+`corpus_k8_v1_24x4096.pkl`.
 
 **Colab workflow:** train on TPU; arena/diagnostics on CPU runtime
 (`JAX_PLATFORMS=cpu` — `run_arena` is dispatch-bound; `policy_match`,
@@ -272,7 +272,7 @@ staleness, exploration temperature).
   this is TPU-friendly; rollout leaves are too expensive to batch at
   scale.
 
-## Step 2 — Add the policy head  [Status: IN PROGRESS]
+## Step 2 — Add the policy head  [Status: DONE 2026-06-13]
 
 Extend `ValueNet` to a joint policy+value net (`jass_value_net.py` docstring
 notes the per-card trunk was designed for this):
@@ -381,12 +381,20 @@ small-K rollout MCTS.
     −11.2 to clearly-better-than-random. Below the teacher's +33.7;
     CE still falling, so extension may close some of the gap. Good
     enough as PUCT priors regardless.
-  - Remaining before closing Step 2: re-measure the rollout-baseline
-    yardstick with the PV value head (V₁ measured −31.1 at 100 games;
-    expect roughly −20 now — 1000 games, `run_batched_arena(pv_params,
-    k_v=64, k_base=8, n_base=8, games=1000, v_apply=pv_value_apply)`),
-    and optionally extend training to 1200 epochs via checkpoint resume
-    and re-gate.
+  - **Yardstick re-measured (2026-06-13, 1000 games, ~1.6 s/game —
+    rollout side dominates): PV-MCTS K=64 vs rollout K=8 N=8: −20.6,
+    *** — first movement of this gap since Step 0** (V₀ −37.5, V₁
+    −31.1, both at 100-game ±9 precision; this one ±2.5). Matches the
+    gate (a) transfer prediction (−31.1 + 12.6 ≈ −18.5). **This is the
+    number Step 3's first PUCT generation must beat.**
+
+  **STEP 2 CLOSED 2026-06-13.** Success criteria met: value head beats
+  (not just matches) Step 1's V; policy-only clearly beats random
+  (+9.9), though below the teacher's +33.7 — CE was still falling at
+  epoch 600, so an extension run (`num_epochs=1200`, same checkpoint,
+  resume) may close some of that gap; worth doing before or alongside
+  early Step 3, but PUCT retrains the policy on visit distributions
+  regardless.
 
 ## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: CODE DONE, untrained]
 

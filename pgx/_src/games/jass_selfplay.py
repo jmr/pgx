@@ -42,7 +42,7 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
-from pgx._src.games.jass import Game, NUM_ACTIONS, value_features
+from pgx._src.games.jass import CARD_SUIT, Game, NUM_ACTIONS, value_features
 from pgx._src.games.jass_mcts import make_search_action_fn
 
 _game = Game()
@@ -329,6 +329,88 @@ def make_policy_collect_fn(pv_apply, pv_params, *, temperature: float = 1.0):
         return _policy_collect(pv_params, key, batch_size)
 
     return collect_fn
+
+
+# ── Suit-permutation data augmentation (docs/jass.md) ─────────────────────────
+#
+# Relabeling suits maps a position to an exactly equivalent one: permute the
+# 9-row suit blocks of the card matrix, the card actions 0–35 and the
+# trump-declare actions 36–39 of pi/legal, and the trump-suit one-hot in the
+# header. Valid permutations: all 4! when no trump suit is set (trump
+# selection steps, Obenabe, Undeufe); the 3! fixing the trump suit in trump
+# modes (the header then stays unchanged by construction).
+
+
+def sample_suit_permutation(key: Array, hd: Array) -> Array:
+    """Sample a valid suit relabeling sigma (old suit → new suit) for a step.
+
+    Args:
+        hd: (20,) header of the step; bits [0:4] are the trump-suit one-hot
+            (all zero during trump selection and in Obenabe/Undeufe).
+
+    Returns:
+        (4,) int32 permutation; sigma[s] is the new label of old suit s.
+        Fixes the trump suit when one is set.
+    """
+    k_full, k_three = jax.random.split(key)
+    full = jax.random.permutation(k_full, 4).astype(jnp.int32)
+
+    is_trump_mode = hd[:4].any()
+    trump_suit = jnp.argmax(hd[:4])
+    # Non-trump suits in ascending order (stable sort puts the True last).
+    others = jnp.argsort(jnp.arange(4) == trump_suit)[:3].astype(jnp.int32)
+    q = jax.random.permutation(k_three, 3)
+    fixed = jnp.arange(4, dtype=jnp.int32).at[others].set(others[q])
+
+    return jnp.where(is_trump_mode, fixed, full)
+
+
+def apply_suit_permutation(sigma: Array, cm: Array, hd: Array,
+                           pi: Array = None, legal: Array = None):
+    """Apply a suit relabeling to one step's features (and policy targets).
+
+    Args:
+        sigma: (4,) suit permutation, old → new.
+        cm: (36, 12), hd: (20,); optionally pi: (43,) and legal: (43,).
+
+    Returns:
+        (cm, hd) or (cm, hd, pi, legal), relabeled.
+    """
+    inv = jnp.argsort(sigma)                       # new suit → old suit
+    ranks = jnp.arange(36, dtype=jnp.int32) % 9
+    card_gather = inv[CARD_SUIT] * 9 + ranks       # new card → old card
+
+    cm_new = cm[card_gather]
+    hd_new = hd.at[:4].set(hd[:4][inv])
+
+    if pi is None:
+        return cm_new, hd_new
+
+    # Card actions 0–35 follow the cards; declare actions 36–39 follow the
+    # suits; Obenabe/Undeufe/Schiebe (40–42) are unchanged.
+    action_gather = jnp.concatenate([
+        card_gather,
+        36 + inv,
+        jnp.arange(40, NUM_ACTIONS, dtype=jnp.int32),
+    ])
+    return cm_new, hd_new, pi[action_gather], legal[action_gather]
+
+
+def augment_suits(key: Array, cm: Array, hd: Array,
+                  pi: Array = None, legal: Array = None):
+    """Apply an independent random suit relabeling to each step of a batch.
+
+    Args:
+        cm: (N, 36, 12), hd: (N, 20); optionally pi/legal: (N, 43).
+
+    Returns:
+        Same-shape (cm, hd) or (cm, hd, pi, legal).
+    """
+    keys = jax.random.split(key, cm.shape[0])
+    sigmas = jax.vmap(sample_suit_permutation)(keys, hd)
+    if pi is None:
+        return jax.vmap(apply_suit_permutation)(sigmas, cm, hd)
+    return jax.vmap(apply_suit_permutation)(sigmas, cm, hd, pi, legal)
 
 
 # ── Policy arena (no search) ───────────────────────────────────────────────────

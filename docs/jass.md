@@ -179,7 +179,11 @@ The value network predicts the **score differential** for the current player's t
 
 ### Data augmentation
 
-Suit permutations are a free augmentation, but trump breaks the symmetry. In Obenabe and Undeufe all 4! = 24 suit permutations are valid. In trump modes, the three non-trump suits can be permuted freely (3! = 6×) but trump cannot be swapped with a non-trump suit. **Not yet implemented** — scheduled as part of Step 1 in `docs/jass_plan.md`.
+Suit permutations are a free augmentation, but trump breaks the symmetry. In Obenabe and Undeufe all 4! = 24 suit permutations are valid. In trump modes, the three non-trump suits can be permuted freely (3! = 6×) while the trump suit keeps its label.
+
+**Implemented** in `jass_selfplay.py`: `sample_suit_permutation` / `apply_suit_permutation` / `augment_suits` (and `augment=` in `train_model` / `train_pv_model`). The transform relabels the 9-row suit blocks of the card matrix, the card actions 0–35 **and the trump-declare actions 36–39** of policy targets and legal masks, and the trump-suit one-hot in the header. Verified against the engine: features/masks of a directly suit-relabeled `GameState` match the transformed arrays exactly.
+
+Note: in trump modes a full 4! permutation *with the trump one-hot remapped* would also be exactly equivalent (suit scores follow the trump label); the sampler conservatively keeps the trump suit fixed, so the header is unchanged in trump modes. The 4! extension is available for free if more diversity is ever wanted.
 
 ### Trump selection with V
 

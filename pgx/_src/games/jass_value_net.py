@@ -28,7 +28,11 @@ import jax.numpy as jnp
 import optax
 
 from pgx._src.games.jass import NUM_ACTIONS
-from pgx._src.games.jass_selfplay import collect_batch, collect_pv_batch
+from pgx._src.games.jass_selfplay import (
+    augment_suits,
+    collect_batch,
+    collect_pv_batch,
+)
 
 # Scale target into roughly [-1, 1] for stable training.
 # The network outputs pred ≈ differential / SCALE; multiply back at inference.
@@ -233,6 +237,7 @@ def train_model(
     batch_size: int = 8192,
     num_epochs: int = 1000,
     lr: float = 3e-4,
+    augment: bool = False,
     print_every: int = 100,
     seed: int = 0,
     checkpoint_path: str = None,
@@ -255,6 +260,11 @@ def train_model(
         batch_size: Number of games per training batch and holdout set.
         num_epochs: Total training epochs.
         lr: Adam learning rate.
+        augment: Apply a random suit relabeling to every training sample
+            each epoch (jass_selfplay.augment_suits). Default False: the
+            canonical V0/V1 runs predate augmentation, and resuming their
+            checkpoints requires the unaugmented RNG stream. The eval
+            holdout is never augmented.
         print_every: Print train/eval loss every N epochs.
         seed: PRNG seed for reproducibility.
         checkpoint_path: If given, (params, opt_state, epoch) is written
@@ -303,12 +313,17 @@ def train_model(
         if epoch < start_epoch:
             continue  # replay the RNG stream up to the checkpoint
 
+        if augment:
+            k1, k_aug = jax.random.split(k1)
+
         cm, hd, y, alive = collect_fn(k1, batch_size)
 
         cm = cm.reshape(-1, 36, 12)
         hd = hd.reshape(-1, 20)
         y = y.reshape(-1)
         mask = alive.reshape(-1).astype(jnp.float32)
+        if augment:
+            cm, hd = augment_suits(k_aug, cm, hd)
 
         params, opt_state, train_loss = step_fn(params, opt_state, cm, hd, y, mask)
 
@@ -341,6 +356,7 @@ def train_pv_model(
     num_epochs: int = 1000,
     lr: float = 3e-4,
     policy_weight: float = 1.0,
+    augment: bool = True,
     print_every: int = 100,
     seed: int = 0,
     checkpoint_path: str = None,
@@ -364,6 +380,10 @@ def train_pv_model(
         lr: Adam learning rate.
         policy_weight: Weight of the policy cross-entropy in the loss
             (value MSE has weight 1).
+        augment: Apply a random suit relabeling to every training sample
+            each epoch (cm, hd, pi, and legal together; see
+            jass_selfplay.augment_suits). Default True — free data
+            diversity; the eval holdout is never augmented.
         print_every: Print train/eval losses every N epochs.
         seed: PRNG seed for reproducibility.
         checkpoint_path: As in train_model (slot files, resume replays
@@ -403,8 +423,13 @@ def train_pv_model(
         if epoch < start_epoch:
             continue  # replay the RNG stream up to the checkpoint
 
-        batch = _flatten_pv(collect_fn(k1, batch_size))
-        params, opt_state, train_loss, _, _ = step_fn(params, opt_state, *batch)
+        if augment:
+            k1, k_aug = jax.random.split(k1)
+        cm, hd, y, pi, legal, mask = _flatten_pv(collect_fn(k1, batch_size))
+        if augment:
+            cm, hd, pi, legal = augment_suits(k_aug, cm, hd, pi, legal)
+        params, opt_state, train_loss, _, _ = step_fn(
+            params, opt_state, cm, hd, y, pi, legal, mask)
 
         if epoch % print_every == 0:
             _, _, e_loss, e_v, e_p = step_fn(params, opt_state, *eval_batch)

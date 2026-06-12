@@ -1,8 +1,12 @@
 import jax
 import jax.numpy as jnp
 
+from pgx._src.games.jass import CARD_SUIT, DECLARE_OFFSET, Game, value_features
 from pgx._src.games.jass_selfplay import (
+    apply_suit_permutation,
+    augment_suits,
     collect_batch,
+    collect_pv_batch,
     make_policy_action_fn,
     make_policy_collect_fn,
     make_search_collect_fn,
@@ -10,8 +14,11 @@ from pgx._src.games.jass_selfplay import (
     make_v_collect_fn,
     policy_match,
     random_action_fn,
+    sample_suit_permutation,
 )
 from pgx._src.games.jass_value_net import TARGET_SCALE, PolicyValueNet, ValueNet
+
+_game = Game()
 
 
 B = 4
@@ -155,6 +162,120 @@ def test_policy_action_fn_in_policy_match():
     scores = policy_match(p_fn, random_action_fn, jax.random.PRNGKey(0), 4)
     assert scores.shape == (8,)
     assert jnp.all(jnp.abs(scores) <= 157)
+
+
+# ── Suit-permutation augmentation ──────────────────────────────────────────────
+
+
+def _permute_state(state, sigma):
+    """Relabel suits of a GameState directly (test oracle)."""
+    inv = jnp.argsort(sigma)
+    ranks = jnp.arange(36, dtype=jnp.int32) % 9
+    old_of_new = inv[CARD_SUIT] * 9 + ranks       # gather map for card masks
+    new_of_old = sigma[CARD_SUIT] * 9 + ranks     # for card indices
+
+    tc = state.trick_cards
+    tc_new = jnp.where(tc >= 0, new_of_old[jnp.clip(tc, 0)], -1)
+    led_new = jnp.where(state.led_suit >= 0,
+                        sigma[jnp.clip(state.led_suit, 0, 3)], -1)
+    is_suit_trump = (state.trump >= 0) & (state.trump < 4)
+    trump_new = jnp.where(is_suit_trump,
+                          sigma[jnp.clip(state.trump, 0, 3)], state.trump)
+    return state._replace(
+        hands=state.hands[:, old_of_new],
+        cards_collected=state.cards_collected[:, old_of_new],
+        trick_cards=tc_new.astype(jnp.int32),
+        led_suit=led_new.astype(jnp.int32),
+        trump=trump_new.astype(jnp.int32),
+        void_in_suit=state.void_in_suit[:, inv],
+    )
+
+
+def _midgame_state(seed, declare):
+    state = _game.init(jax.random.PRNGKey(seed))
+    state = _game.step(state, jnp.int32(declare))
+    key = jax.random.PRNGKey(seed + 1)
+    for _ in range(6):  # into the second trick
+        key, sk = jax.random.split(key)
+        state = _game.step(state, random_action_fn(state, sk))
+    return state
+
+
+def _assert_permutation_consistent(state, sigma):
+    """Permuted features/masks must equal features/masks of permuted state."""
+    p = state.current_player
+    cm, hd = value_features(state, p)
+    legal = _game.legal_action_mask(state)
+    pi = legal / legal.sum()  # any distribution supported on legal
+
+    cm_a, hd_a, pi_a, legal_a = apply_suit_permutation(sigma, cm, hd, pi, legal)
+
+    perm_state = _permute_state(state, sigma)
+    cm_o, hd_o = value_features(perm_state, p)
+    legal_o = _game.legal_action_mask(perm_state)
+
+    assert jnp.array_equal(cm_a, cm_o)
+    assert jnp.array_equal(hd_a, hd_o)
+    assert jnp.array_equal(legal_a, legal_o)
+    assert jnp.allclose(pi_a, legal_o / legal_o.sum())
+
+
+def test_suit_permutation_matches_engine_trump_mode():
+    state = _midgame_state(0, DECLARE_OFFSET + 1)  # ♥ trump
+    sigma = jnp.int32([2, 1, 3, 0])                # fixes ♥
+    _assert_permutation_consistent(state, sigma)
+
+
+def test_suit_permutation_matches_engine_obenabe_full_4():
+    state = _midgame_state(2, DECLARE_OFFSET + 4)  # Obenabe
+    sigma = jnp.int32([3, 0, 1, 2])                # full 4-cycle
+    _assert_permutation_consistent(state, sigma)
+
+
+def test_suit_permutation_trump_selection_phase():
+    state = _game.init(jax.random.PRNGKey(7))      # trump not yet declared
+    sigma = jnp.int32([1, 2, 3, 0])
+    _assert_permutation_consistent(state, sigma)
+
+
+def test_sample_suit_permutation_fixes_trump():
+    state = _midgame_state(4, DECLARE_OFFSET + 2)  # ♠ trump (suit 2)
+    _, hd = value_features(state, state.current_player)
+    seen = set()
+    for i in range(40):
+        sigma = sample_suit_permutation(jax.random.PRNGKey(i), hd)
+        assert jnp.array_equal(jnp.sort(sigma), jnp.arange(4))
+        assert int(sigma[2]) == 2  # trump suit fixed
+        seen.add(tuple(int(x) for x in sigma))
+    assert len(seen) == 6  # all 3! permutations of the non-trump suits
+
+
+def test_sample_suit_permutation_full_when_no_trump_suit():
+    state = _midgame_state(5, DECLARE_OFFSET + 4)  # Obenabe
+    _, hd = value_features(state, state.current_player)
+    seen = set()
+    for i in range(200):
+        sigma = sample_suit_permutation(jax.random.PRNGKey(i), hd)
+        assert jnp.array_equal(jnp.sort(sigma), jnp.arange(4))
+        seen.add(tuple(int(x) for x in sigma))
+    assert len(seen) == 24  # all 4! permutations
+
+
+def test_augment_suits_batch_contract():
+    cm, hd, y, pi, legal, alive = collect_pv_batch(jax.random.PRNGKey(0), B)
+    flat = (cm.reshape(-1, 36, 12), hd.reshape(-1, 20),
+            pi.reshape(-1, 43), legal.reshape(-1, 43))
+    cm_a, hd_a, pi_a, legal_a = augment_suits(jax.random.PRNGKey(1), *flat)
+    assert cm_a.shape == flat[0].shape and cm_a.dtype == flat[0].dtype
+    assert hd_a.shape == flat[1].shape
+    # Relabeling preserves counts: cards held, legal moves, pi mass.
+    assert jnp.array_equal(cm_a.sum((1, 2)), flat[0].sum((1, 2)))
+    assert jnp.array_equal(legal_a.sum(-1), flat[3].sum(-1))
+    assert jnp.allclose(pi_a.sum(-1), flat[2].sum(-1))
+    # Value-only variant.
+    cm_v, hd_v = augment_suits(jax.random.PRNGKey(1), flat[0], flat[1])
+    assert jnp.array_equal(cm_v, cm_a)
+    assert jnp.array_equal(hd_v, hd_a)
 
 
 def test_v_collect_matches_random_play_distribution_contract():

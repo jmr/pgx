@@ -141,11 +141,14 @@ Smallest change that adds the missing ingredient. Tasks:
    `train_model(collect_fn=...)`. Full `best_action` per move inside the
    scan is too slow for data generation at first; optionally mix in a
    small fraction of search-generated games later.
-2. **Suit-permutation augmentation.** Documented in `docs/jass.md` but NOT yet
-   implemented. 3! = 6× in trump modes (non-trump suits permute freely; trump
-   suit fixed), 4! = 24× in Obenabe/Undeufe. Apply to (cm, hd, y) batches —
-   permuting suits = permuting 9-row blocks of the card matrix + remapping the
-   trump one-hot in the header.
+2. **Suit-permutation augmentation.** DONE (code, 2026-06-12):
+   `augment_suits` in `jass_selfplay.py`, wired into `train_model`
+   (`augment=False` default — canonical V0/V1 RNG stream preserved) and
+   `train_pv_model` (`augment=True` default). 3! in trump modes (trump
+   suit fixed), 4! in Obenabe/Undeufe and during trump selection. Also
+   permutes pi/legal card actions 0–35 AND trump-declare actions 36–39
+   (needed for policy targets; not in the original sketch). Verified
+   against the engine on directly-relabeled GameStates.
 3. **Replay buffer.** Mix the last few generations of data (e.g. uniform over
    the most recent 3) to avoid catastrophic drift.
 4. **Gated promotion.** New V must beat old V in the arena (significant

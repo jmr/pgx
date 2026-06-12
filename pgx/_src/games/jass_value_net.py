@@ -374,7 +374,12 @@ def train_pv_model(
             jass_selfplay.make_search_collect_fn(...) for Step 2 data.
             Defaults to collect_pv_batch (uniform-random play — smoke
             tests / value-only pretraining; its pi targets carry no
-            signal).
+            signal). May also be a list/tuple of such generators — the
+            replay-buffer mixing of docs/jass_plan.md Step 1 task 3:
+            epochs round-robin over them, so passing the generators of
+            the last few generations mixes their data evenly. Put the
+            newest generator first: the eval holdout is collected from
+            the first entry.
         batch_size: Number of games per training batch and holdout set.
         num_epochs: Total training epochs.
         lr: Adam learning rate.
@@ -396,6 +401,8 @@ def train_pv_model(
     """
     if collect_fn is None:
         collect_fn = collect_pv_batch
+    collect_fns = (tuple(collect_fn)
+                   if isinstance(collect_fn, (list, tuple)) else (collect_fn,))
     key = jax.random.PRNGKey(seed)
 
     model = PolicyValueNet()
@@ -414,7 +421,7 @@ def train_pv_model(
 
     print("Collecting holdout batch for eval ...")
     key, k_eval = jax.random.split(key)
-    eval_batch = _flatten_pv(collect_fn(k_eval, batch_size))
+    eval_batch = _flatten_pv(collect_fns[0](k_eval, batch_size))
     print(f"  {int(eval_batch[-1].sum())} labeled positions\n")
 
     t0 = time.perf_counter()
@@ -425,7 +432,8 @@ def train_pv_model(
 
         if augment:
             k1, k_aug = jax.random.split(k1)
-        cm, hd, y, pi, legal, mask = _flatten_pv(collect_fn(k1, batch_size))
+        epoch_collect = collect_fns[epoch % len(collect_fns)]
+        cm, hd, y, pi, legal, mask = _flatten_pv(epoch_collect(k1, batch_size))
         if augment:
             cm, hd, pi, legal = augment_suits(k_aug, cm, hd, pi, legal)
         params, opt_state, train_loss, _, _ = step_fn(

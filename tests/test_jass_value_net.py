@@ -126,6 +126,24 @@ def test_pv_train_model_smoke():
     assert value.shape == (2,)
 
 
+def test_pv_train_model_round_robins_collect_fns():
+    from pgx._src.games.jass_selfplay import collect_pv_batch
+
+    calls = []
+
+    def gen(name):
+        def fn(key, batch_size):
+            calls.append(name)
+            return collect_pv_batch(key, batch_size)
+        return fn
+
+    train_pv_model(collect_fn=[gen("a"), gen("b")],
+                   batch_size=2, num_epochs=4, print_every=100)
+    # First call is the eval holdout (from the first = newest generator),
+    # then epochs alternate a, b, a, b.
+    assert calls == ["a", "a", "b", "a", "b"]
+
+
 def test_pv_checkpoint_resume_is_equivalent(tmp_path):
     ckpt = str(tmp_path / "pv_ckpt.msgpack")
 

@@ -149,8 +149,11 @@ Smallest change that adds the missing ingredient. Tasks:
    permutes pi/legal card actions 0–35 AND trump-declare actions 36–39
    (needed for policy targets; not in the original sketch). Verified
    against the engine on directly-relabeled GameStates.
-3. **Replay buffer.** Mix the last few generations of data (e.g. uniform over
-   the most recent 3) to avoid catastrophic drift.
+3. **Replay buffer.** DONE (code, 2026-06-12) for the PV loop:
+   `train_pv_model(collect_fn=[gen_g, gen_g-1, gen_g-2])` round-robins
+   epochs over the listed generators (newest first; eval holdout comes
+   from the first). Mixes the last few generations' data evenly to avoid
+   catastrophic drift.
 4. **Gated promotion.** New V must beat old V in the arena (significant
    at p<0.05 on the paired tests) before becoming the data generator. Keep all
    generation weights (`v0.msgpack`, `v1.msgpack`, ...).

@@ -366,6 +366,24 @@ small-K rollout MCTS.
     Step 0/1 value line was rank-blind; the PV value head no longer is,
     so gate (a) may now beat V₁ rather than match it. Retrain required
     (same corpus is fine — data is architecture-independent).
+- **2026-06-13, run 3 (fixed architecture, same 24×4096 corpus) — BOTH
+  GATES PASS.** Training: total 1.60 → 0.59, **v 0.29 → 0.12, p 1.3 →
+  0.48** (≈62% mass on the search argmax; still slightly falling at
+  epoch 600 — old 0.90 "floor" was the architecture, not noise).
+  - **Gate (a): +12.6 over V₁** (K=64 both, 1000 games) — decisive, and
+    the first clear value-function improvement of the project. The
+    rank-blind V line's ceiling was at least partly the missing card
+    identity, not only the improvement operator.
+  - Gate (b): policy-only (τ=0.1) vs random: **+9.9, p≈0.0000** — from
+    −11.2 to clearly-better-than-random. Below the teacher's +33.7;
+    CE still falling, so extension may close some of the gap. Good
+    enough as PUCT priors regardless.
+  - Remaining before closing Step 2: re-measure the rollout-baseline
+    yardstick with the PV value head (V₁ measured −31.1 at 100 games;
+    expect roughly −20 now — 1000 games, `run_batched_arena(pv_params,
+    k_v=64, k_base=8, n_base=8, games=1000, v_apply=pv_value_apply)`),
+    and optionally extend training to 1200 epochs via checkpoint resume
+    and re-gate.
 
 ## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: CODE DONE, untrained]
 

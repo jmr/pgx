@@ -277,9 +277,12 @@ staleness, exploration temperature).
 Extend `ValueNet` to a joint policy+value net (`jass_value_net.py` docstring
 notes the per-card trunk was designed for this):
 
-- **Card logits (36):** one logit per card from the per-card trunk (Dense(1)
-  on each row before pooling). DONE (code, 2026-06-12): `PolicyValueNet`
-  in `jass_value_net.py`, returns `(logits (B,43), value (B,))`.
+- **Card logits (36):** one logit per card. DONE (code, 2026-06-12):
+  `PolicyValueNet` in `jass_value_net.py`, returns `(logits (B,43),
+  value (B,))`. ⚠ The original sketch here — bare Dense(1) on each trunk
+  row before pooling — is exactly the run 2 bug (see Results): each
+  logit must also see global context, and the rows need the card
+  identity encoding. Don't regress to the sketch.
 - **Trump logits (7):** actions 36–42, from the pooled features + header.
   DONE (same).
 - Mask illegal actions at the loss and at sampling (mask comes from

@@ -162,6 +162,16 @@ Columns 0–5 and 7–10 are mutually exclusive per card (a card is held by exac
 
 Column 11 (`is_trump`) is zero in Obenabe and Undeufe modes (no suit is trump in those modes).
 
+**Card identity is positional — and invisible to row-shared architectures.**
+The 12 columns describe a card's *state*, not which card it is; identity (suit,
+rank) is encoded only by row index. Any net that processes rows with shared
+weights and pools symmetrically (the per-card-MLP + mean-pool trunk) therefore
+cannot tell a Jack from a six. `PolicyValueNet` compensates by concatenating a
+constant suit-one-hot ⊕ rank-one-hot (13 bits) onto each row *inside the
+module* (`_CARD_IDENTITY` in `jass_value_net.py`) — the stored/collected
+features stay (36, 12). The legacy `ValueNet` (V₀/V₁ artifacts) predates this
+and is identity-blind; see the Step 2 run 2 post-mortem in `jass_plan.md`.
+
 ### Header — `(20,)` bool
 
 Scalar context that does not fit neatly into the card matrix:

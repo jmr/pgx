@@ -315,6 +315,20 @@ small-K rollout MCTS.
 
 **Results:**
 
+- **2026-06-12, run 1 — policy head learned nothing (target bug, fixed).**
+  First PV training (corpus reuse: 12 × 4096 search games, K=8 V₁-leaf,
+  τ=10, ~1.2 s/epoch on TPU vs 73 s/epoch fresh-data): value head healthy
+  (eval v 0.30 → 0.14 by epoch 500), but policy CE flat at uniform-over-
+  legal (1.32 → 1.31). Root cause: the collector emitted the τ=10-SAMPLED
+  action as the one-hot target, i.e. it taught the policy the exploration
+  noise, whose optimum is near uniform. Fixed in `make_search_collect_fn`
+  (now `make_search_policy_fn`): pi = one-hot of the search ARGMAX,
+  played action sampled separately. Search corpora collected before the
+  fix have unusable pi targets — re-collect (labels/value data were fine).
+  Practical numbers from this run, same hardware: collection 73 s per
+  8192 games; batch 8192 training OOMs a 16G TPU (~13.5G train step +
+  ~2G pinned corpus) — use batch 4096 and `jax.device_get` the corpus.
+
 ## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: CODE DONE, untrained]
 
 Implemented 2026-06-12 in `pgx/_src/games/jass_puct.py` (`puct_search`,

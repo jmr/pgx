@@ -136,6 +136,44 @@ def test_search_collect_fn_contract():
     _check_pv_batch(*out)
 
 
+def test_search_policy_fn_targets_argmax_not_sampled_action():
+    """pi must be the search argmax even when play is temperature-sampled.
+
+    Training on the sampled action instead teaches the policy the
+    exploration noise (at high temperature: uniform-over-legal).
+    """
+    from pgx._src.games.jass_mcts import best_action
+    from pgx._src.games.jass_selfplay import make_search_policy_fn
+
+    state = _game.init(jax.random.PRNGKey(3))
+    state = _game.step(state, jnp.int32(DECLARE_OFFSET))
+    legal = _game.legal_action_mask(state)
+
+    hot = make_search_policy_fn(num_determinizations=2, num_rollouts=1,
+                                temperature=1e6)
+    sampled_differs = 0
+    for i in range(20):
+        key = jax.random.PRNGKey(i)
+        action, pi = hot(state, key)
+        # The target is the greedy search action for this step's search
+        # key (first half of the split), regardless of what was played.
+        k_search, _ = jax.random.split(key)
+        expected = best_action(state, state.current_player, k_search,
+                               num_determinizations=2, num_rollouts=1)
+        assert int(jnp.argmax(pi)) == int(expected)
+        assert float(pi.sum()) == 1.0 and float(pi.max()) == 1.0
+        assert bool(legal[action])
+        sampled_differs += int(action) != int(expected)
+    # At temperature 1e6 play is ~uniform over legal: it must frequently
+    # deviate from the argmax target (else targets track the sample).
+    assert sampled_differs >= 5
+
+    # Greedy variant: played action and target coincide by construction.
+    greedy = make_search_policy_fn(num_determinizations=2, num_rollouts=1)
+    action, pi = greedy(state, jax.random.PRNGKey(0))
+    assert int(jnp.argmax(pi)) == int(action)
+
+
 def test_search_collect_fn_with_v_leaf():
     model = ValueNet()
     params = model.init(jax.random.PRNGKey(1),

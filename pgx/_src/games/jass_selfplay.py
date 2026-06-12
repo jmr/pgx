@@ -43,7 +43,7 @@ import jax.numpy as jnp
 from jax import Array
 
 from pgx._src.games.jass import CARD_SUIT, Game, NUM_ACTIONS, value_features
-from pgx._src.games.jass_mcts import make_search_action_fn
+from pgx._src.games.jass_mcts import _action_scores, make_search_action_fn
 
 _game = Game()
 _MAX_STEPS = 38   # 2 trump-selection + 9*4 card-play steps
@@ -280,11 +280,17 @@ def make_search_collect_fn(v_apply=None, v_params=None, *,
                            temperature: float = None):
     """Build a collect_fn(key, batch_size) playing with determinized search.
 
-    Every seat plays with make_search_action_fn (best_action per move:
-    random-rollout leaves by default, V leaves when v_apply is given;
-    temperature=None is greedy, > 0 samples softmax(scores/temperature) for
-    exploration). The policy target pi is the one-hot of the chosen action
-    — the Step 2 training target, upgraded to visit distributions in Step 3.
+    Every seat runs best_action's evaluation per move (random-rollout
+    leaves by default, V leaves when v_apply is given). The policy target
+    pi is the one-hot of the search's ARGMAX action — the Step 2 training
+    target, upgraded to visit distributions in Step 3. The *played* action
+    is the argmax too when temperature=None, or sampled with probability
+    softmax(scores/temperature) when temperature > 0 (exploration).
+    Played action and target are deliberately decoupled: training on the
+    sampled action instead would teach the policy the exploration noise —
+    at temperature 10 that target is near-uniform over decent moves, and
+    a policy head trained on it stays at uniform-over-legal (measured:
+    eval CE 1.32 → 1.31 over 500 epochs).
 
     Much more expensive per game than collect_batch / make_v_collect_fn:
     each move runs K determinizations × A actions of leaf evaluation.
@@ -293,19 +299,50 @@ def make_search_collect_fn(v_apply=None, v_params=None, *,
     Returns:
         collect_fn(key, batch_size) → (cm, hd, labels, pi, legal, alive).
     """
+
     @functools.partial(jax.jit, static_argnames=("batch_size",))
     def _search_collect(params, key: Array, batch_size: int):
-        action_fn = make_search_action_fn(
+        policy_fn = make_search_policy_fn(
+            v_apply, params,
             num_determinizations=num_determinizations,
-            num_rollouts=num_rollouts,
-            v_params=params, v_apply=v_apply, v_scale=v_scale,
+            num_rollouts=num_rollouts, v_scale=v_scale,
             temperature=temperature)
-        return _collect_pv(as_policy_fn(action_fn), key, batch_size)
+        return _collect_pv(policy_fn, key, batch_size)
 
     def collect_fn(key: Array, batch_size: int):
         return _search_collect(v_params, key, batch_size)
 
     return collect_fn
+
+
+def make_search_policy_fn(v_apply=None, v_params=None, *,
+                          num_determinizations: int = 8,
+                          num_rollouts: int = 8,
+                          v_scale: float = 100.0,
+                          temperature: float = None):
+    """policy_fn(state, key) → (action, pi) for search self-play.
+
+    pi is the one-hot of the search's argmax (the training target);
+    the returned action is that argmax when temperature=None, or a
+    softmax(scores/temperature) sample for exploration. The search
+    consumes the first of split(key); the sample the second.
+    """
+
+    def policy_fn(s, k):
+        k_search, k_sample = jax.random.split(k)
+        scores, mask = _action_scores(
+            s, s.current_player, k_search,
+            num_determinizations, num_rollouts,
+            v_params, v_apply, v_scale)
+        best = jnp.argmax(jnp.where(mask, scores, jnp.float32(-jnp.inf)))
+        pi = jax.nn.one_hot(best, NUM_ACTIONS, dtype=jnp.float32)
+        if temperature is None:
+            return best.astype(jnp.int32), pi
+        logits = jnp.where(mask, scores / temperature, jnp.float32(-1e9))
+        action = jax.random.categorical(k_sample, logits).astype(jnp.int32)
+        return action, pi
+
+    return policy_fn
 
 
 def make_policy_collect_fn(pv_apply, pv_params, *, temperature: float = 1.0):

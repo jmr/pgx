@@ -207,9 +207,10 @@ Smallest change that adds the missing ingredient. Tasks:
    colab TPU 2026-06-12:** V₁-vs-V₀ gate (K=64 both, 100 games, seed 0)
    reproduced the sequential arena's neutral result, in ~22 s total
    including compile — vs ~8.5 s/game sequential on the same hardware,
-   ≈40× faster. V-leaf-vs-V-leaf gates at 1000 games are now ~4 min;
-   use `run_batched_arena` for all V-vs-V gating. (Rollout-baseline
-   matchups are heavier per ply — time a small run before scaling.)
+   ≈40× faster. Follow-up at 1000 games: 62 s (≈0.06 s/game, ≈140×
+   sequential) — V-vs-V gates default to 1000 games / ±2–3 pt
+   resolution from now on. (Rollout-baseline matchups are heavier per
+   ply — time a small run before scaling.)
 7. Iterate 2–3 generations.
 
 **Success criterion:** monotone improvement across generations AND beating the
@@ -228,7 +229,17 @@ staleness, exploration temperature).
     Nominally 6.4 pts better than V₀'s −37.5 but within noise.
   - V₁ vs V₀ (gate, K=64 vs K=64, 100 games / 50 pairs): **49 wins,
     mean −2.5, sd(pair mean)=23.8, t=−0.7 — neutral.** Power was ~±9 pts,
-    so this is a genuine null, not underpowered.
+    so a null at the gate's resolution (but see the 1000-game re-run
+    below: there IS a small edge under the ±9 floor).
+  - **AMENDMENT (2026-06-12, batched arena, 1000 games / 500 pairs,
+    62 s on TPU):** V₁ vs V₀ (K=64 both): **mean +2.7, sd(pair
+    mean)=27.2, t=2.2, p=0.028.** So generation 1 was not strictly
+    neutral: one V-greedy generation bought ≈ +2.7 ± 2.4 pts/game,
+    resolvable only at 1k-game power. Third look at this matchup
+    (−2.5, ≈0, +2.7), so treat as "probably a small real edge". This
+    does NOT reopen Step 1: ~3 pts/generation with Q2 showing the
+    1-ply greedy improvement already saturated cannot close the
+    ~37.5-pt gap to the rollout baseline. Conclusion below stands.
 
   **Debugging hypotheses (in test order):**
   1. ~~The V₀-greedy generator barely improves on random play~~

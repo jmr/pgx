@@ -25,8 +25,10 @@ slot files (deletable now that V₁ is finished). Everything through
 `policy_match` is pushed (`main`).
 
 **Colab workflow:** train on TPU; arena/diagnostics on CPU runtime
-(`JAX_PLATFORMS=cpu` — `run_arena` is dispatch-bound; `policy_match` is
-vmapped and fast anywhere). Update the package with
+(`JAX_PLATFORMS=cpu` — `run_arena` is dispatch-bound; `policy_match`,
+`run_batched_arena`, and the PUCT/search collectors are vmapped and fast
+anywhere). `pip install mctx` (needed for `jass_puct`; not preinstalled,
+intentionally not in requirements.txt). Update the package with
 `pip install --force-reinstall --no-deps git+<fork>@main`, restart the
 runtime, and verify a newly added symbol exists before burning quota.
 Training survives preemption via `train_model(checkpoint_path=...)`
@@ -263,7 +265,23 @@ small-K rollout MCTS.
 
 **Results:**
 
-## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: TODO]
+## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: CODE DONE, untrained]
+
+Implemented 2026-06-12 in `pgx/_src/games/jass_puct.py` (`puct_search`,
+`puct_action`, `make_puct_action_fn`, `make_puct_policy_fn`,
+`make_puct_collect_fn`). Requires `mctx` (`pip install mctx`, not
+preinstalled on colab; like flax/optax it is intentionally not in
+`requirements/requirements.txt`). Sign conventions validated end to end by
+`test_puct_sign_conventions_beat_random`: PUCT (K=2, 16 sims) with a
+greedy points-collected stand-in value beats uniform random by ≈ +14
+pts/game over 64 games (t≈2.3); a perspective flip anywhere would make it
+≈ −30 or worse. Notable implementation points beyond the sketch below:
+reward on a tree edge is taken from the *parent mover's* perspective and
+the team-aware discount is +1 within team / −1 across teams (consecutive
+movers are NOT always opponents in Jass — trick winners lead, Schiebe
+passes to partner — so the usual two-player discount=−1 is wrong here);
+terminal states are held fixed with reward/discount 0 to prevent double
+counting.
 
 See `docs/jass_mcts.md` "Option B" for the integration sketch. Key decisions:
 

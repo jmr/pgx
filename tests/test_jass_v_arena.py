@@ -22,6 +22,22 @@ def test_run_batched_arena_smoke():
     assert np.all(np.isfinite(scores))
 
 
+def test_run_batched_arena_pv_value_head_challenger():
+    """A PolicyValueNet value head can drive the challenger via v_apply."""
+    from pgx._src.games.jass_value_net import PolicyValueNet
+
+    pv_model = PolicyValueNet()
+    pv_params = pv_model.init(jax.random.PRNGKey(2),
+                              jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
+    pv_value_apply = lambda p, cm, hd: pv_model.apply(p, cm, hd)[1]
+    baseline = _init_params(0)
+    scores = run_batched_arena(pv_params, baseline_params=baseline,
+                               k_v=2, k_base=2, games=2, chunk_pairs=1,
+                               seed=0, v_apply=pv_value_apply)
+    assert scores.shape == (2,)
+    assert np.all(np.isfinite(scores))
+
+
 def test_run_batched_arena_v_vs_v_deterministic():
     """V-vs-V gating mode runs and is reproducible for a fixed seed."""
     params = _init_params(0)

@@ -229,7 +229,8 @@ def run_arena(params, *, baseline_params=None, k_v=64, k_base=8, n_base=8,
 
 
 def run_batched_arena(params, *, baseline_params=None, k_v=64, k_base=8,
-                      n_base=8, games=100, chunk_pairs=25, seed=0):
+                      n_base=8, games=100, chunk_pairs=25, seed=0,
+                      v_apply=None, baseline_v_apply=None):
     """Batched drop-in for run_arena: same matchups, vmapped execution.
 
     All games in a chunk run in lockstep inside one jitted call (vmap over
@@ -254,15 +255,25 @@ def run_batched_arena(params, *, baseline_params=None, k_v=64, k_base=8,
         chunk_pairs: Pairs per jitted call. Larger = more parallelism and
             memory; progress prints once per chunk.
         seed:    PRNG seed.
+        v_apply: Apply function for the challenger's value leaf,
+            (params, cm, hd) → (B,) scaled value. Defaults to
+            ValueNet().apply. For a PolicyValueNet value head pass e.g.
+            ``lambda p, cm, hd: pv_model.apply(p, cm, hd)[1]`` (define it
+            once and reuse — a new callable means a new jit trace).
+        baseline_v_apply: Same for the baseline (with baseline_params);
+            defaults to ValueNet().apply.
 
     Returns:
         np.ndarray of per-game score differentials from the challenger's
         perspective, pair-adjacent (even length).
     """
-    model = ValueNet()
+    if v_apply is None or baseline_v_apply is None:
+        model = ValueNet()
+        v_apply = v_apply or model.apply
+        baseline_v_apply = baseline_v_apply or model.apply
     challenger_fn = make_search_action_fn(
         num_determinizations=k_v, num_rollouts=1,
-        v_params=params, v_apply=model.apply, v_scale=TARGET_SCALE)
+        v_params=params, v_apply=v_apply, v_scale=TARGET_SCALE)
     label_c = f"V-MCTS K={k_v}"
     if baseline_params is None:
         baseline_fn = make_search_action_fn(
@@ -271,7 +282,7 @@ def run_batched_arena(params, *, baseline_params=None, k_v=64, k_base=8,
     else:
         baseline_fn = make_search_action_fn(
             num_determinizations=k_base, num_rollouts=1,
-            v_params=baseline_params, v_apply=model.apply,
+            v_params=baseline_params, v_apply=baseline_v_apply,
             v_scale=TARGET_SCALE)
         label_b = f"V-MCTS K={k_base} (baseline weights)"
 

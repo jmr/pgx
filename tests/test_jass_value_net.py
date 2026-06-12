@@ -8,6 +8,7 @@ from pgx._src.games.jass_value_net import (
     PolicyValueNet,
     make_pv_train_step,
     train_model,
+    train_pv_model,
 )
 
 
@@ -116,6 +117,24 @@ def test_checkpoint_corrupt_slot_falls_back(tmp_path):
     p_resumed, _ = train_model(batch_size=4, num_epochs=4, print_every=100,
                                checkpoint_path=ckpt, checkpoint_every=2)
     assert _params_equal(p4, p_resumed)
+
+
+def test_pv_train_model_smoke():
+    params, model = train_pv_model(batch_size=4, num_epochs=2, print_every=100)
+    logits, value = model.apply(params, jnp.zeros((2, 36, 12)), jnp.zeros((2, 20)))
+    assert logits.shape == (2, 43)
+    assert value.shape == (2,)
+
+
+def test_pv_checkpoint_resume_is_equivalent(tmp_path):
+    ckpt = str(tmp_path / "pv_ckpt.msgpack")
+
+    p_full, _ = train_pv_model(batch_size=4, num_epochs=4, print_every=100)
+    train_pv_model(batch_size=4, num_epochs=2, print_every=100,
+                   checkpoint_path=ckpt, checkpoint_every=2)
+    p_resumed, _ = train_pv_model(batch_size=4, num_epochs=4, print_every=100,
+                                  checkpoint_path=ckpt, checkpoint_every=2)
+    assert _params_equal(p_full, p_resumed)
 
 
 def test_checkpoint_legacy_bare_file_is_read(tmp_path):

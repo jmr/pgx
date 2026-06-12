@@ -259,6 +259,20 @@ def _collect_pv(policy_fn, key: Array, batch_size: int):
     return cm, hd, labels, pi, legal, alive
 
 
+@functools.partial(jax.jit, static_argnames=("batch_size",))
+def collect_pv_batch(key: Array, batch_size: int):
+    """Uniform-random play with the PV contract (one-hot pi of random moves).
+
+    The policy targets carry no signal (behavior cloning of random play);
+    useful as a smoke-test generator and for value-only pretraining with
+    policy_weight=0.
+
+    Returns:
+        (cm, hd, labels, pi, legal, alive) — see module docstring.
+    """
+    return _collect_pv(as_policy_fn(random_action_fn), key, batch_size)
+
+
 def make_search_collect_fn(v_apply=None, v_params=None, *,
                            num_determinizations: int = 8,
                            num_rollouts: int = 8,

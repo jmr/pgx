@@ -28,7 +28,7 @@ import jax.numpy as jnp
 import optax
 
 from pgx._src.games.jass import NUM_ACTIONS
-from pgx._src.games.jass_selfplay import collect_batch
+from pgx._src.games.jass_selfplay import collect_batch, collect_pv_batch
 
 # Scale target into roughly [-1, 1] for stable training.
 # The network outputs pred ≈ differential / SCALE; multiply back at inference.
@@ -317,6 +317,101 @@ def train_model(
             elapsed = time.perf_counter() - t0
             print(f"[{epoch:4d}]  train={float(train_loss):.4f}"
                   f"  eval={float(eval_loss):.4f}"
+                  f"  ({elapsed:.0f}s)")
+
+        if checkpoint_path is not None and (epoch + 1) % checkpoint_every == 0:
+            _save_checkpoint(checkpoint_path, params, opt_state, epoch + 1,
+                             slot=(epoch + 1) // checkpoint_every)
+
+    return params, model
+
+
+def _flatten_pv(batch):
+    """Flatten a (cm, hd, y, pi, legal, alive) batch for the train step."""
+    cm, hd, y, pi, legal, alive = batch
+    return (cm.reshape(-1, 36, 12), hd.reshape(-1, 20), y.reshape(-1),
+            pi.reshape(-1, NUM_ACTIONS), legal.reshape(-1, NUM_ACTIONS),
+            alive.reshape(-1).astype(jnp.float32))
+
+
+def train_pv_model(
+    *,
+    collect_fn=None,
+    batch_size: int = 8192,
+    num_epochs: int = 1000,
+    lr: float = 3e-4,
+    policy_weight: float = 1.0,
+    print_every: int = 100,
+    seed: int = 0,
+    checkpoint_path: str = None,
+    checkpoint_every: int = 100,
+) -> tuple:
+    """Train a PolicyValueNet from scratch on self-play data.
+
+    Same loop shape as train_model (fresh batch per epoch, fixed holdout
+    for eval, slot-file checkpointing with RNG fast-forward on resume),
+    but for the joint net with the PV collect contract.
+
+    Args:
+        collect_fn: Data generator with the PV contract: (key, batch_size)
+            → (cm, hd, labels, pi, legal, alive); e.g.
+            jass_selfplay.make_search_collect_fn(...) for Step 2 data.
+            Defaults to collect_pv_batch (uniform-random play — smoke
+            tests / value-only pretraining; its pi targets carry no
+            signal).
+        batch_size: Number of games per training batch and holdout set.
+        num_epochs: Total training epochs.
+        lr: Adam learning rate.
+        policy_weight: Weight of the policy cross-entropy in the loss
+            (value MSE has weight 1).
+        print_every: Print train/eval losses every N epochs.
+        seed: PRNG seed for reproducibility.
+        checkpoint_path: As in train_model (slot files, resume replays
+            the RNG stream; same collect_fn / hyperparameters assumed).
+        checkpoint_every: Checkpoint interval in epochs.
+
+    Returns:
+        (params, model) — trained Flax parameters and the PolicyValueNet
+        instance.
+    """
+    if collect_fn is None:
+        collect_fn = collect_pv_batch
+    key = jax.random.PRNGKey(seed)
+
+    model = PolicyValueNet()
+    key, k0 = jax.random.split(key)
+    params = model.init(k0, jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
+    optimizer = optax.adam(lr)
+    opt_state = optimizer.init(params)
+    step_fn = make_pv_train_step(model, optimizer, policy_weight)
+
+    start_epoch = 0
+    if checkpoint_path is not None:
+        loaded = _load_checkpoint(checkpoint_path, (params, opt_state, 0))
+        if loaded is not None:
+            params, opt_state, start_epoch = loaded
+            print(f"Resuming from {checkpoint_path} at epoch {start_epoch}\n")
+
+    print("Collecting holdout batch for eval ...")
+    key, k_eval = jax.random.split(key)
+    eval_batch = _flatten_pv(collect_fn(k_eval, batch_size))
+    print(f"  {int(eval_batch[-1].sum())} labeled positions\n")
+
+    t0 = time.perf_counter()
+    for epoch in range(num_epochs):
+        key, k1 = jax.random.split(key)
+        if epoch < start_epoch:
+            continue  # replay the RNG stream up to the checkpoint
+
+        batch = _flatten_pv(collect_fn(k1, batch_size))
+        params, opt_state, train_loss, _, _ = step_fn(params, opt_state, *batch)
+
+        if epoch % print_every == 0:
+            _, _, e_loss, e_v, e_p = step_fn(params, opt_state, *eval_batch)
+            elapsed = time.perf_counter() - t0
+            print(f"[{epoch:4d}]  train={float(train_loss):.4f}"
+                  f"  eval={float(e_loss):.4f}"
+                  f"  (v={float(e_v):.4f}  p={float(e_p):.4f})"
                   f"  ({elapsed:.0f}s)")
 
         if checkpoint_path is not None and (epoch + 1) % checkpoint_every == 0:

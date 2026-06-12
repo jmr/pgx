@@ -236,6 +236,11 @@ notes the per-card trunk was designed for this):
   `make_pv_train_step` (masked cross-entropy + value MSE, `policy_weight`
   knob).
 - Value head unchanged (structurally identical layers; fresh init).
+- Training loop: `train_pv_model()` in `jass_value_net.py` — same shape
+  as `train_model` (fresh batch per epoch, fixed eval holdout, slot-file
+  checkpointing + RNG-fast-forward resume), PV collect contract,
+  `policy_weight` knob, prints v/p loss split. DONE (code, 2026-06-12).
+  `collect_pv_batch` (random play, PV contract) is the smoke default.
 
 First uses, before PUCT exists:
 

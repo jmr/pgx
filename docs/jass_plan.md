@@ -7,17 +7,20 @@ This document is the working plan. It is written so that a fresh agent (or a
 human returning after a break) can pick up from any step. Update the **Status**
 markers as work completes; record arena results in the step's **Results** slot.
 
-## Status snapshot (2026-06-14)
+## Status snapshot (2026-06-15)
 
-**Where we are:** Steps 0–2 done; the gen-0 PolicyValueNet (run 3, 20k
-epochs) is now **fully re-gated and promoted** — value +13.2 vs V₁,
-policy-only +33 vs random, and the rollout yardstick at **−19.8 ± ~1.3
-(1000 games, t=−14.8 vs zero)**, statistically indistinguishable from
-run3@600's −20.6 (Δ0.8 ≈ 0.3σ). The flat yardstick is *expected*: it runs
-V-MCTS, exercising only the value head (essentially unchanged), not the
-policy head (which made the big gains and is only load-bearing under
-PUCT). Step 3 (PUCT expert iteration) is the active step — its code is in
-place; next action is PUCT data generation for generation 1. Step 1 closed
+**Where we are:** Steps 0–2 done; **Step 3 (PUCT expert iteration) has
+its first generation and it CLIMBED.** Gen-0 (run 3, 20k epochs) was
+re-gated/promoted (value +13.2 vs V₁, policy-only +33 vs random, rollout
+yardstick −19.8). Gen-1 was then trained on a gen-0 PUCT corpus + Step-2
+replay and **beat gen-0 in PUCT-vs-PUCT by ~+4.6–4.9 pts/game (two seeds,
+t≈2.9–3.2, p<0.005, 1000 games) — the project's first generation to
+climb via search-improved policy.** Crucially, this win is invisible to
+the value-MCTS gates (a wash) and to policy CE (pinned at its entropy
+floor); it shows only in PUCT-vs-PUCT, where priors are load-bearing. So
+**PUCT-vs-PUCT is THE Step-3 gate**; the V-MCTS gates only track the
+(barely-changed) value head. Next: gen-2 (gen-1 as generator), ~1 h
+training. Step 1 closed
 as a negative result
 (see its CONCLUSION; no more V-greedy generations — though the 1k-game
 re-run showed gen 1 was +2.7, small-positive, not strictly neutral).
@@ -32,39 +35,41 @@ of the project), and the rollout-baseline yardstick moved for the first
 time since Step 0: **PV-MCTS K=64 vs rollout K=8 N=8 = −20.6 ± ~2.5
 (1000 games)**. That is the number generation 1 must beat.
 
-**Operational facts:** TPU quota constraints are gone (longer runs and
-bigger slices available; code is still single-device — sharding is a
-queued task for when PUCT data generation needs it). V-vs-V arenas:
-1000 games ≈ 1 min; vs-rollout arenas ≈ 1.6 s/game. PV training uses a
-pickled fixed corpus (`corpus_k8_v1_24x4096.pkl` on Drive) + fresh
-eval holdout via `eval_collect_fn`; batch 4096 (8192 OOMs a 16G TPU).
+**Operational facts:** TPU quota constraints are gone, but the active
+Colab TPU has only **~12.2 G usable** (not 16 G). V-vs-V arenas: 1000
+games ≈ 1 min; vs-rollout arenas ≈ 2 s/game (the rollout side dominates).
+**PUCT data-gen cost scales super-linearly in `num_simulations`** (K=8:
+sims 16/32/64 = 22.7 / 95.5 / 504.5 ms/game; the old "1.5–2×" estimate
+was wrong — the multiplier is ≈ num_simulations). Larger batch does NOT
+help (compute-bound, not utilization-bound). **Memory rules for PV
+training:** keep the corpus on HOST (numpy), never `jnp.asarray` the whole
+thing — that pins ~30 batches on the TPU and OOMs. Use 2048 games/step
+(`split=2` in the cached collect_fn); a 4096-game step needs ~14 G. The
+eval batch also runs a full grad step, so it must be small too.
 
-**Next (Step 3, generation 1):**
+**Next (Step 3, generation 2):**
 
-1. DONE (2026-06-14): extended the run-3 checkpoint to 20k epochs
-   (resumed at 600, no architecture change). Eval policy CE 0.48 → 0.29,
-   eval value loss 0.12 → 0.076. **Re-gated and promoted as gen-0**:
-   value +13.2 vs V₁, policy-only +33 vs random, rollout yardstick −19.8
-   (1000 games) = no movement vs −20.6 (within noise; V-MCTS uses the
-   value head only, which barely changed). Export to `pv_gen0.msgpack`
-   for use as the PUCT data generator.
-2. Generate PUCT data with the Step 2 net:
-   `make_puct_collect_fn(pv_model.apply, pv_params,
-   num_determinizations=8, num_simulations=64, temperature=1.0)`.
-   Time a small batch first (PUCT ≈ 1.5–2× the per-game cost of the
-   1-ply search collect); build a corpus, pickle it.
-3. Train generation 1 (fresh `PolicyValueNet`, replay mixing:
-   `collect_fn=[puct_corpus_fns..., step2_corpus_fns...]` newest first).
-4. Gates: gen-1 PV-MCTS vs gen-0 PV-MCTS (K=64, 1000 games, both via
-   `v_apply=`), and the rollout yardstick (beat −20.6). Policy-only vs
-   random should also move toward the teacher number.
-5. Iterate; promote only on a significant gate win (p<0.05).
+1. Generate a gen-2 PUCT corpus with the **gen-1** net (`pv_gen1.msgpack`)
+   as generator: `make_puct_collect_fn(pv_model.apply, gen1_params,
+   num_determinizations=8, num_simulations=16, temperature=1.0)` (sims=16
+   was enough — its soft targets carried real signal; higher sims cost
+   super-linearly for no measured target-sharpness gain). ~32k games.
+2. Train gen-2 (fresh `PolicyValueNet`, replay mixing newest-first:
+   `collect_fn=[gen2_puct_fns, gen1_puct_fns, step2_fns]`; host corpus,
+   split=2). ~20k epochs ≈ 1 h.
+3. **Gate that matters: gen-2 PUCT vs gen-1 PUCT** (`make_puct_action_fn`
+   greedy, K=8/sims=64, via `policy_match`, chunked ~10 pairs, 1000
+   games). Promote on a significant win (p<0.05). The V-MCTS gates
+   (gen-2 vs gen-1 value head, rollout yardstick) are secondary value-head
+   checks — expect them flat unless the value head moves.
+4. Iterate; a second consecutive PUCT-vs-PUCT climb makes the trend real.
 
 **Artifacts:** weights on Drive under `MyDrive/jass/`: `v0.msgpack`,
 `v1.msgpack` (canonical ValueNet line, now legacy/rank-blind),
-`pv3_ckpt.msgpack*` slots (Step 2 PolicyValueNet, run 3) — export final
-params to `pv_gen0.msgpack` for clarity. Step 2 corpus:
-`corpus_k8_v1_24x4096.pkl`.
+`pv3_ckpt.msgpack*` slots + `pv_gen0.msgpack` (Step 2 PolicyValueNet,
+run 3 @ 20k = gen-0), `pv_gen1.msgpack` (gen-1, promoted). Corpora:
+`corpus_k8_v1_24x4096.pkl` (Step 2), `corpus_puct_gen0_8x4096_s16k8.pickle`
+(gen-1's PUCT corpus, gen-0 generator).
 
 **Colab workflow:** train on TPU; arena/diagnostics on CPU runtime
 (`JAX_PLATFORMS=cpu` — `run_arena` is dispatch-bound; `policy_match`,
@@ -409,7 +414,7 @@ small-K rollout MCTS.
   early Step 3, but PUCT retrains the policy on visit distributions
   regardless.
 
-## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: CODE DONE, gen-0 (20k) re-gated + promoted; PUCT data generation for gen-1 next]
+## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: WORKING — gen-1 climbed (+4.6–4.9 PUCT-vs-PUCT, p<0.005) and was promoted; gen-2 next]
 
 Implemented 2026-06-12 in `pgx/_src/games/jass_puct.py` (`puct_search`,
 `puct_action`, `make_puct_action_fn`, `make_puct_policy_fn`,
@@ -498,6 +503,37 @@ rollout baseline at matched wall-clock.
   checkpoint must be restored with a `PolicyValueNet` template — a
   `ValueNet` template silently downcasts it to a 4-Dense tree that fails
   only at apply with `ScopeParamNotFoundError: Dense_4`.)
+
+- **2026-06-15, GENERATION 1 — FIRST PUCT GENERATION, PROMOTED.** Gen-1
+  (fresh `PolicyValueNet`) trained on a gen-0 PUCT corpus
+  (`make_puct_collect_fn`, K=8, **sims=16**, τ=1.0; 32k games = 8×4096) +
+  the Step-2 corpus, **50/50 replay mix** (`collect_fn=[puct_fn,
+  step2_fn]`), 20k epochs, host corpus + `split=2` (2048 games/step for
+  TPU memory). Eval: value loss 0.27 → 0.10 (≈ gen-0's 0.076);
+  **policy CE flat at 1.30 the entire run.**
+  - **The CE was NOT a stall — it was the entropy floor of the soft PUCT
+    target.** CE against a soft target is floored at the target's entropy
+    (here ≈ 1.2–1.3: the visit dist had max mass ~0.52 over ~3.5
+    actions); uniform-over-legal is also ≈ 1.3, so "stuck at 1.30" and
+    "matching the target" are indistinguishable in CE. Diagnose soft
+    targets with top-1 agreement / target entropy, never raw CE.
+  - **Gate (c) — gen-1 PUCT vs gen-0 PUCT** (`make_puct_action_fn`,
+    greedy, K=8/sims=64, `policy_match`, 1000 games): **seed 0 +4.9
+    (t=3.2), seed 2 +4.6 (t=2.9), both p<0.005 — PROMOTE.** The
+    project's first generation to climb via a search-improved policy
+    (cf. Step 1 V-greedy's +2.7 that saturated — this is the right
+    mechanism). Note cumulative-mean regression-to-mean: a hot first
+    chunk read +16, the rest +4.6 — trust the full-sample t, not the
+    running mean's path.
+  - **Gates (a)/(b) — value-head only — a WASH.** (a) gen-1 vs gen-0
+    V-MCTS K=64: +2.8 (p=0.028). (b) gen-1 vs rollout K=8 N=8: −22.4
+    (t=−16.4) vs gen-0's −19.8 → −2.6, p≈0.18, ns. **Opposite signs ⇒ no
+    real value change** (consistent with gen-1's slightly-higher value
+    loss; it trained on less data than gen-0). **Lesson: V-MCTS arenas
+    cannot see policy gains; PUCT-vs-PUCT is the load-bearing Step-3
+    gate.**
+  - Promoted artifact: `pv_gen1.msgpack`. Next: gen-2 with gen-1 as
+    generator.
 
 ## Step 4 — Scale and benchmark externally  [Status: TODO]
 

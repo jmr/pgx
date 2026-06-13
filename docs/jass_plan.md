@@ -33,8 +33,12 @@ eval holdout via `eval_collect_fn`; batch 4096 (8192 OOMs a 16G TPU).
 
 **Next (Step 3, generation 1):**
 
-1. Optional first: extend run 3 to `num_epochs=1200` (same checkpoint,
-   resumes at 600) and re-gate — policy CE was still falling.
+1. DONE (2026-06-13/14): extended the run-3 checkpoint to 20k epochs
+   (resumed at 600, no architecture change). Eval policy CE 0.48 → 0.29,
+   eval value loss 0.12 → 0.076, both still falling but flattening (see
+   Step 3 Results). **Re-gate this checkpoint** (gate (a) vs V₁, gate (b)
+   policy-only vs random, rollout yardstick vs −20.6) before treating it
+   as generation 1 or using it for PUCT data generation.
 2. Generate PUCT data with the Step 2 net:
    `make_puct_collect_fn(pv_model.apply, pv_params,
    num_determinizations=8, num_simulations=64, temperature=1.0)`.
@@ -396,7 +400,7 @@ small-K rollout MCTS.
   early Step 3, but PUCT retrains the policy on visit distributions
   regardless.
 
-## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: CODE DONE, untrained]
+## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: CODE DONE, run 3 checkpoint extended to 20k epochs, re-gate pending]
 
 Implemented 2026-06-12 in `pgx/_src/games/jass_puct.py` (`puct_search`,
 `puct_action`, `make_puct_action_fn`, `make_puct_policy_fn`,
@@ -440,6 +444,36 @@ Strategy fusion / non-locality is an accepted known flaw at this stage.
 rollout baseline at matched wall-clock.
 
 **Results:**
+
+- **2026-06-13/14, run 3 extended (same checkpoint, resumed past epoch 600,
+  no architecture change) — policy CE still falling, approaching a
+  plateau.** Eval losses (total / value / policy CE):
+  - epoch 600 (run 3 gate point): 0.59 / 0.12 / 0.48
+  - epoch 2000: 0.47 / 0.08 / 0.39
+  - epoch 10000: 0.39 / 0.080 / 0.32
+  - epoch 20000: 0.36 / 0.076 / 0.29
+
+  Policy CE dropped from 0.48 (the value already gated at this point: +12.6
+  over V₁) to 0.29 — well below the old (pre-identity-fix) architecture's
+  0.90 floor and getting closer to the teacher's implied target (teacher
+  greedy-K8-V₁-search was +33.7 vs policy-only +9.9 at CE 0.48). Value loss
+  also kept improving (0.12 → 0.076).
+
+- **2026-06-14, re-gate of the 20k-epoch checkpoint** (1000 games each,
+  same arena setup as the run3@600 gates, p=0.0000 to 4dp for both):
+  - Gate (a) vs V₁ (K=64 both): **60.2% win, mean +13.2, p<0.0001** —
+    essentially matches run3@600's +12.6, i.e. no regression and a small
+    further gain. Value head is at least holding its Step-2 win over V₁.
+  - Gate (b) policy-only (τ=1) vs uniform random: **72.9% win, mean +33,
+    p<0.0001** — a large jump from run3@600 (τ=0.1, +9.9), and now
+    essentially matches the search-teacher's own strength (greedy
+    K8-V₁-search vs random: 72.3% win, +33.7, 512 games). The policy head
+    has nearly closed the gap to the teacher it was distilled from.
+
+  Net effect: the 20k-epoch checkpoint is at least as good as the
+  run3@600 checkpoint on value and a clear, significant improvement on
+  policy. Still TBD: the rollout yardstick (PV-MCTS K=64 vs rollout K=8
+  N=8, beat −20.6).
 
 ## Step 4 — Scale and benchmark externally  [Status: TODO]
 

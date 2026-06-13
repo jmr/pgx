@@ -7,10 +7,18 @@ This document is the working plan. It is written so that a fresh agent (or a
 human returning after a break) can pick up from any step. Update the **Status**
 markers as work completes; record arena results in the step's **Results** slot.
 
-## Status snapshot (2026-06-13)
+## Status snapshot (2026-06-14)
 
-**Where we are:** Steps 0–2 done; Step 3 (PUCT expert iteration) is next
-and its code is already in place. Step 1 closed as a negative result
+**Where we are:** Steps 0–2 done; the gen-0 PolicyValueNet (run 3, 20k
+epochs) is now **fully re-gated and promoted** — value +13.2 vs V₁,
+policy-only +33 vs random, and the rollout yardstick at **−19.8 ± ~1.3
+(1000 games, t=−14.8 vs zero)**, statistically indistinguishable from
+run3@600's −20.6 (Δ0.8 ≈ 0.3σ). The flat yardstick is *expected*: it runs
+V-MCTS, exercising only the value head (essentially unchanged), not the
+policy head (which made the big gains and is only load-bearing under
+PUCT). Step 3 (PUCT expert iteration) is the active step — its code is in
+place; next action is PUCT data generation for generation 1. Step 1 closed
+as a negative result
 (see its CONCLUSION; no more V-greedy generations — though the 1k-game
 re-run showed gen 1 was +2.7, small-positive, not strictly neutral).
 **Step 2 closed 2026-06-13 after a productive failure:** the first
@@ -33,12 +41,13 @@ eval holdout via `eval_collect_fn`; batch 4096 (8192 OOMs a 16G TPU).
 
 **Next (Step 3, generation 1):**
 
-1. DONE (2026-06-13/14): extended the run-3 checkpoint to 20k epochs
+1. DONE (2026-06-14): extended the run-3 checkpoint to 20k epochs
    (resumed at 600, no architecture change). Eval policy CE 0.48 → 0.29,
-   eval value loss 0.12 → 0.076, both still falling but flattening (see
-   Step 3 Results). **Re-gate this checkpoint** (gate (a) vs V₁, gate (b)
-   policy-only vs random, rollout yardstick vs −20.6) before treating it
-   as generation 1 or using it for PUCT data generation.
+   eval value loss 0.12 → 0.076. **Re-gated and promoted as gen-0**:
+   value +13.2 vs V₁, policy-only +33 vs random, rollout yardstick −19.8
+   (1000 games) = no movement vs −20.6 (within noise; V-MCTS uses the
+   value head only, which barely changed). Export to `pv_gen0.msgpack`
+   for use as the PUCT data generator.
 2. Generate PUCT data with the Step 2 net:
    `make_puct_collect_fn(pv_model.apply, pv_params,
    num_determinizations=8, num_simulations=64, temperature=1.0)`.
@@ -400,7 +409,7 @@ small-K rollout MCTS.
   early Step 3, but PUCT retrains the policy on visit distributions
   regardless.
 
-## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: CODE DONE, run 3 checkpoint extended to 20k epochs, re-gate pending]
+## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: CODE DONE, gen-0 (20k) re-gated + promoted; PUCT data generation for gen-1 next]
 
 Implemented 2026-06-12 in `pgx/_src/games/jass_puct.py` (`puct_search`,
 `puct_action`, `make_puct_action_fn`, `make_puct_policy_fn`,
@@ -472,8 +481,23 @@ rollout baseline at matched wall-clock.
 
   Net effect: the 20k-epoch checkpoint is at least as good as the
   run3@600 checkpoint on value and a clear, significant improvement on
-  policy. Still TBD: the rollout yardstick (PV-MCTS K=64 vs rollout K=8
-  N=8, beat −20.6).
+  policy.
+
+- **2026-06-14, rollout yardstick on the 20k checkpoint** (PV-MCTS K=64
+  vs rollout K=8 N=8, 1000 games via `run_batched_arena` with the PV
+  value head as leaf): **mean −19.8, t=−14.8 vs zero, SE ≈ 1.3.**
+  Indistinguishable from run3@600's −20.6 (Δ0.8 ≈ 0.3σ on a combined SE
+  ≈ 2.8). This is the *correct* result, not a stall: the yardstick is a
+  V-MCTS arena, so only the value head is exercised — and the value head
+  barely moved (gate vs V₁ +12.6 → +13.2, also within noise). The 20k
+  extension's gains were on the policy head (CE 0.48 → 0.29, policy-only
+  +9.9 → +33), which does not enter a V-MCTS leaf at all; it is only
+  load-bearing as PUCT priors. So gen-0 is fully validated (no value
+  regression) and −20.6/−19.8 is the gen-0 baseline that **generation 1
+  (PUCT-trained, priors active) must beat.** (Loading note: the PV
+  checkpoint must be restored with a `PolicyValueNet` template — a
+  `ValueNet` template silently downcasts it to a 4-Dense tree that fails
+  only at apply with `ScopeParamNotFoundError: Dense_4`.)
 
 ## Step 4 — Scale and benchmark externally  [Status: TODO]
 

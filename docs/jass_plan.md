@@ -7,20 +7,36 @@ This document is the working plan. It is written so that a fresh agent (or a
 human returning after a break) can pick up from any step. Update the **Status**
 markers as work completes; record arena results in the step's **Results** slot.
 
-## Status snapshot (2026-06-15)
+## Status snapshot (2026-06-16)
 
-**Where we are:** Steps 0–2 done; **Step 3 (PUCT expert iteration) has
-its first generation and it CLIMBED.** Gen-0 (run 3, 20k epochs) was
-re-gated/promoted (value +13.2 vs V₁, policy-only +33 vs random, rollout
-yardstick −19.8). Gen-1 was then trained on a gen-0 PUCT corpus + Step-2
-replay and **beat gen-0 in PUCT-vs-PUCT by ~+4.6–4.9 pts/game (two seeds,
-t≈2.9–3.2, p<0.005, 1000 games) — the project's first generation to
-climb via search-improved policy.** Crucially, this win is invisible to
-the value-MCTS gates (a wash) and to policy CE (pinned at its entropy
-floor); it shows only in PUCT-vs-PUCT, where priors are load-bearing. So
+**Where we are:** Steps 0–2 done; **Step 3 (PUCT expert iteration)
+climbed once (gen-1) then a gen-2 attempt REGRESSED — gen-2b retry in
+flight.** Gen-0 (run 3, 20k epochs) was re-gated/promoted (value +13.2 vs
+V₁, policy-only +33 vs random, rollout yardstick −19.8). Gen-1 was then
+trained on a gen-0 PUCT corpus + Step-2 replay (2-way 50/50) and **beat
+gen-0 in PUCT-vs-PUCT by ~+4.6–4.9 pts/game (two seeds, t≈2.9–3.2,
+p<0.005, 1000 games) — the project's first generation to climb via
+search-improved policy.** Crucially, this win is invisible to the
+value-MCTS gates (a wash) and to policy CE (pinned at its entropy floor);
+it shows only in PUCT-vs-PUCT, where priors are load-bearing. So
 **PUCT-vs-PUCT is THE Step-3 gate**; the V-MCTS gates only track the
-(barely-changed) value head. Next: gen-2 (gen-1 as generator), ~1 h
-training. Step 1 closed
+(barely-changed) value head. **Gen-2 (2026-06-16) FAILED the gate:**
+trained with a 3-way ⅓ mix `[gen1-PUCT, gen0-PUCT, step2]`, it *lost* to
+gen-1 by −5.0 (t=−3.5) / −4.1 (t=−2.8) — landing back at ≈ gen-0 strength.
+**Gen-2b** (same as gen-1's 2-way 50/50 recipe, gen-0-PUCT dropped) then
+**WASHED** vs gen-1 (−2.0 ns / +1.1 ns): the 3-way mix was indeed harmful
+(recovered the −4.7) **but the climb did not resume**. A diagnostic
+reframes Step 3: **gen-1 PUCT(sims=16) plays ~9 pts WORSE than gen-1's own
+raw policy** (−9.3/−8.5, t≈−6) — the improvement operator has gone
+NEGATIVE at gen-1's strength (the policy outgrew the shallow search). So
+the sims=16 corpus is anti-signal and gen-2b couldn't climb. **Not
+promoted; gen-1 remains champion.** **Fork RESOLVED (sims sweep): too few
+sims.** gen-1 PUCT vs raw policy climbs monotone −9(s16)→+4(s64)→+10(s128)
+→+12(s256) — strategy fusion is not the problem, the operator was starved.
+**Next: regenerate the gen-1 PUCT corpus at sims=128 (the knee), keep the
+2-way 50/50 mix, retrain gen-2, re-gate.** Bonus: PUCT cost is ~linear in
+sims, not super-linear (sims=256/300 games = 432 s), so a 128-sim corpus is
+affordable. Step 1 closed
 as a negative result
 (see its CONCLUSION; no more V-greedy generations — though the 1k-game
 re-run showed gen 1 was +2.7, small-positive, not strictly neutral).
@@ -38,31 +54,45 @@ time since Step 0: **PV-MCTS K=64 vs rollout K=8 N=8 = −20.6 ± ~2.5
 **Operational facts:** TPU quota constraints are gone, but the active
 Colab TPU has only **~12.2 G usable** (not 16 G). V-vs-V arenas: 1000
 games ≈ 1 min; vs-rollout arenas ≈ 2 s/game (the rollout side dominates).
-**PUCT data-gen cost scales super-linearly in `num_simulations`** (K=8:
-sims 16/32/64 = 22.7 / 95.5 / 504.5 ms/game; the old "1.5–2×" estimate
-was wrong — the multiplier is ≈ num_simulations). Larger batch does NOT
-help (compute-bound, not utilization-bound). **Memory rules for PV
+**PUCT cost vs `num_simulations`** — ⚠ the earlier "super-linear,
+multiplier ≈ num_simulations" claim (from the K=8 collector: sims 16/32/64
+= 22.7/95.5/504.5 ms/game) was NOT reproduced by the 2026-06-16 arena
+sweep: `policy_match` (K=8, vmapped) measured ~250/600/1500 ms/game at
+sims=64/128/256 — only ~×2.4 per doubling, roughly *linear*. Treat sims as
+roughly linear-cost until re-measured; re-time the collector before
+assuming a high-sims corpus is prohibitive. Larger batch does NOT help
+(compute-bound, not utilization-bound). **Memory rules for PV
 training:** keep the corpus on HOST (numpy), never `jnp.asarray` the whole
 thing — that pins ~30 batches on the TPU and OOMs. Use 2048 games/step
 (`split=2` in the cached collect_fn); a 4096-game step needs ~14 G. The
 eval batch also runs a full grad step, so it must be small too.
 
-**Next (Step 3, generation 2):**
+**Next (Step 3, generation 2b — RETRY after the gen-2 regression):**
 
-1. Generate a gen-2 PUCT corpus with the **gen-1** net (`pv_gen1.msgpack`)
-   as generator: `make_puct_collect_fn(pv_model.apply, gen1_params,
-   num_determinizations=8, num_simulations=16, temperature=1.0)` (sims=16
-   was enough — its soft targets carried real signal; higher sims cost
-   super-linearly for no measured target-sharpness gain). ~32k games.
-2. Train gen-2 (fresh `PolicyValueNet`, replay mixing newest-first:
-   `collect_fn=[gen2_puct_fns, gen1_puct_fns, step2_fns]`; host corpus,
-   split=2). ~20k epochs ≈ 1 h.
-3. **Gate that matters: gen-2 PUCT vs gen-1 PUCT** (`make_puct_action_fn`
+⚠ The original gen-2 plan below used a **3-way ⅓ mix**
+(`[gen1-PUCT, gen0-PUCT, step2]`) and **FAILED the gate (regressed to
+≈ gen-0)** — see the gen-2 Results entry. gen-2b drops gen-0-PUCT and
+reverts to gen-1's proven 2-way 50/50.
+
+1. PUCT corpus already generated: the **gen-1** net (`pv_gen1.msgpack`)
+   as generator, `make_puct_collect_fn(pv_model.apply, gen1_params,
+   num_determinizations=8, num_simulations=16, temperature=1.0)`, ~32k
+   games (sims=16 was enough for gen-1 — soft targets carried real
+   signal; higher sims cost super-linearly for no measured sharpness
+   gain). Reuse it.
+2. Train gen-2b (fresh `PolicyValueNet`, **2-way 50/50**
+   `collect_fn=[gen1-PUCT, step2]` — exactly gen-1's recipe, only the
+   generator changed; host corpus, split=2, checkpoint
+   `pv_gen2b_ckpt.msgpack`). ~20k epochs ≈ 1 h.
+3. **Gate that matters: gen-2b PUCT vs gen-1 PUCT** (`make_puct_action_fn`
    greedy, K=8/sims=64, via `policy_match`, chunked ~10 pairs, 1000
-   games). Promote on a significant win (p<0.05). The V-MCTS gates
-   (gen-2 vs gen-1 value head, rollout yardstick) are secondary value-head
-   checks — expect them flat unless the value head moves.
-4. Iterate; a second consecutive PUCT-vs-PUCT climb makes the trend real.
+   games, two seeds). Promote on a significant win (p<0.05). The V-MCTS
+   gates (value head, rollout yardstick) are secondary — expect them flat
+   unless the value head moves.
+4. If gen-2b climbs → the 3-way window was the bug; adopt 2-way
+   `[newest-PUCT, step2]` as the standing recipe. If it also fails →
+   suspect sims=16 target saturation; next lever is a higher-sims corpus.
+   A second consecutive PUCT-vs-PUCT climb makes the trend real.
 
 **Artifacts:** weights on Drive under `MyDrive/jass/`: `v0.msgpack`,
 `v1.msgpack` (canonical ValueNet line, now legacy/rank-blind),
@@ -414,7 +444,7 @@ small-K rollout MCTS.
   early Step 3, but PUCT retrains the policy on visit distributions
   regardless.
 
-## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: WORKING — gen-1 climbed (+4.6–4.9 PUCT-vs-PUCT, p<0.005) and was promoted; gen-2 next]
+## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: gen-1 CHAMPION (+4.6–4.9, p<0.005); gen-2 (3-way) regressed, gen-2b (2-way) washed; diagnostic found PUCT sims=16 had dropped BELOW the raw policy, but sweep showed the operator was just starved (−9 s16 → +12 s256). NEXT: gen-2 corpus at sims=128, 2-way mix, re-gate]
 
 Implemented 2026-06-12 in `pgx/_src/games/jass_puct.py` (`puct_search`,
 `puct_action`, `make_puct_action_fn`, `make_puct_policy_fn`,
@@ -534,6 +564,106 @@ rollout baseline at matched wall-clock.
     gate.**
   - Promoted artifact: `pv_gen1.msgpack`. Next: gen-2 with gen-1 as
     generator.
+
+- **2026-06-16, GENERATION 2 — GATE FAILED, NOT PROMOTED.** Gen-2 (fresh
+  `PolicyValueNet`) trained on a **3-way ⅓ replay mix** newest-first,
+  `collect_fn=[gen1-PUCT, gen0-PUCT, step2]` — i.e. the gen-1-generated
+  PUCT corpus (`make_puct_collect_fn`, K=8, sims=16, τ=1.0, 32k games),
+  the gen-0-generated PUCT corpus, and the Step-2 corpus, ⅓ epochs each.
+  Same everything else as gen-1 (20k epochs, batch 4096, `split=2`,
+  policy_weight=1.0, augment=True). Eval: value loss → **0.1023**
+  (≈ gen-1's 0.10), policy CE pinned at the soft-target floor ~1.33 as
+  expected (uninformative).
+  - **The 3-way round-robin makes train loss bounce period-3** — a
+    *liveness* signal, not progress: the one-hot Step-2 batch can drive
+    CE toward 0 (train ≈0.83) while the two soft PUCT batches are floored
+    at their target entropy (train ≈1.33/1.42). All expected; only eval
+    value loss is a real progress signal here, and it's not gateable.
+  - **Gate — gen-2 PUCT vs gen-1 PUCT** (`make_puct_action_fn`, greedy,
+    K=8/sims=64, `policy_match`, 1000 games): **seed 0 −5.0 (t=−3.5),
+    seed 2 −4.1 (t=−2.8) — both significantly NEGATIVE. REGRESSION.**
+    Gen-2 *lost* to gen-1 by ≈ a full generation, landing back at
+    **≈ gen-0 strength** (a near-mirror of gen-1's +4.7 gain over gen-0).
+    Not promoted; **gen-1 remains champion and generator.**
+  - **Leading hypothesis: the 3-way mix.** The only structural change
+    from gen-1's climbing recipe (2-way 50/50 `[gen0-PUCT, step2]`) was
+    the mix: gen-2 cut the newest/best corpus from 50%→33% and added ⅓
+    of an *older* PUCT generation (gen-0). Because each generation is
+    retrained **from scratch** (not warm-started like canonical AZ), the
+    mix composition is more load-bearing — a fresh net trained ⅓ on
+    gen-0's behavior is dragged toward gen-0's policy. The landing-spot
+    (≈ gen-0) is consistent with this. (Reducing Step-2 from 50→33%
+    should only help — it's the weakest, one-hot V₁-leaf teacher — so it
+    is unlikely to be the cause.)
+  - **Next: gen-2b** — controlled retry changing exactly one thing vs the
+    *proven* gen-1 recipe: the generator. 2-way 50/50
+    `[gen1-PUCT, step2]`, gen-0-PUCT dropped; checkpoint
+    `pv_gen2b_ckpt.msgpack`. If gen-2b climbs → the 3-way window was the
+    bug; adopt "newest-PUCT + step2 only" as the standing recipe and
+    update Step 3's plan. If gen-2b also fails to climb → hypothesis
+    shifts to **PUCT iteration saturating at sims=16**; next lever is
+    sharper targets (higher-sims corpus), not the mix.
+
+- **2026-06-16, GENERATION 2b — WASH (not promoted), and a diagnostic that
+  reframes Step 3.** gen-2b = gen-1's exact recipe (fresh `PolicyValueNet`,
+  2-way 50/50 `[gen1-PUCT, step2]`, gen-0-PUCT dropped, 20k epochs, eval
+  value loss → 0.1034 ≈ gen-1's 0.10). The controlled A/B vs gen-2: same
+  generator, same newest corpus, only the mix differs.
+  - **Gate — gen-2b PUCT vs gen-1 PUCT** (greedy, K=8/sims=64,
+    `policy_match`, 1000 games): **seed 0 −2.0 (t=−1.4, p=0.15), seed 2
+    +1.1 (t=0.7, p=0.47) — both ns, opposite signs ⇒ a WASH.** gen-2b is
+    statistically indistinguishable from gen-1. Two findings: (1) **the
+    3-way mix WAS harmful** — switching back to 2-way recovered the full
+    −4.7 gen-2 regression to ~0; adopt 2-way `[newest-PUCT, step2]` as the
+    standing recipe. (2) **gen-1's recipe no longer climbs** — one climb
+    (gen-1) then saturation. Not promoted; **gen-1 remains champion.**
+  - **DIAGNOSTIC — teacher vs student (the "why").** Expert iteration only
+    climbs by how much the teacher (PUCT search) beats the student (the raw
+    policy it's distilled into). Measured directly: **gen-1 PUCT(sims=16,
+    the corpus-gen config) vs gen-1 policy-only (raw, τ=0.05),
+    `policy_match`, 300 games/seed: seed 0 −9.3 (t=−6.7), seed 2 −8.5
+    (t=−6.1).** The teacher plays **~9 pts/game WORSE than the student** —
+    the improvement operator hasn't just saturated, **at gen-1's strength
+    it has gone NEGATIVE.** This fully explains gen-2b's wash: the corpus
+    was generated by a process that plays *below* gen-1's own policy, so
+    distilling its visit distributions cannot climb (it washed rather than
+    regressed because soft targets still correlate with the policy and the
+    step2 anchor + the net's inability to fit noise pull it back to the
+    mean policy). The crossover: at gen-0 the policy was weak → sims=16
+    PUCT > gen-0 policy → gen-1 climbed; gen-1's policy then **outgrew** the
+    sims=16 search.
+  - **Two explanations, opposite prescriptions (UNRESOLVED — sweep in
+    flight):** (A) **too few sims** — 16 sims over K=8 dets is ~1–2 ply, not
+    enough to override a now-good prior; *predicts PUCT beats raw policy
+    again at higher sims* → bump corpus sims. (B) **strategy fusion** (the
+    determinization flaw) — each det searches a known-cards world and
+    commits to moves only good under perfect info; summed-visit argmax
+    fuses these into a move bad under real uncertainty, while the
+    info-state raw policy handles uncertainty better; *predicts more sims
+    makes it WORSE* → lever is Step 4/5 (value head, capacity,
+    imperfect-info), and **the raw policy head may already be our strongest
+    player** (meaning the PUCT-vs-PUCT gate is testing the wrong thing).
+  - **SWEEP RESULT (2026-06-16) — explanation A: too few sims.** gen-1 PUCT
+    vs gen-1 raw policy (300 games/seed, A=PUCT): sims=16 **−9** → sims=64
+    **+4.1** (t=1.67, p=0.10) → sims=128 **+10.2** (t=3.8, p=0.0002) →
+    sims=256 **+12.0** (t=4.0, p=0.0001). Monotone increasing, crosses zero
+    ~sims 40–50, healthy by 128, plateauing by 256. **Strategy fusion (B) is
+    NOT dominant — more search helps, not hurts — and the raw policy is NOT
+    our best player** (PUCT at sims≥64 beats it). The operator was simply
+    starved: 16 sims can't outrun a good prior, 128 can.
+  - **NEXT — gen-2 at sims=128.** Regenerate the gen-1 PUCT corpus at
+    **sims=128** (the knee: +10 fuel, clears the +8 bar; sims=256 buys only
+    +2 more for ~2.5× the cost), keep the proven 2-way 50/50
+    `[gen1-PUCT, step2]` mix, retrain fresh, re-gate gen-2 PUCT vs gen-1
+    PUCT. **This supersedes the gen-1-era "sims=16 was enough" note** — that
+    held only while the policy was weak (gen-0); a stronger prior needs a
+    deeper search to improve on it.
+  - **COST CORRECTION (supersedes the super-linear claim in Operational
+    facts):** measured arena cost (`policy_match`, K=8, vmapped over 10
+    pairs) was **~250 / 600 / 1500 ms/game at sims=64 / 128 / 256** — only
+    ~×2.4–2.5 per doubling, roughly *linear* in sims, NOT "multiplier ≈
+    num_simulations". sims=256 over 300 games took just 432 s. Re-time the
+    *collector* at sims=128 before assuming a 128-sim corpus is expensive.
 
 ## Step 4 — Scale and benchmark externally  [Status: TODO]
 

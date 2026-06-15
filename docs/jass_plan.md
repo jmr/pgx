@@ -7,11 +7,22 @@ This document is the working plan. It is written so that a fresh agent (or a
 human returning after a break) can pick up from any step. Update the **Status**
 markers as work completes; record arena results in the step's **Results** slot.
 
-## Status snapshot (2026-06-16)
+## Status snapshot (2026-06-17)
 
-**Where we are:** Steps 0–2 done; **Step 3 (PUCT expert iteration)
-climbed once (gen-1) then a gen-2 attempt REGRESSED — gen-2b retry in
-flight.** Gen-0 (run 3, 20k epochs) was re-gated/promoted (value +13.2 vs
+**Where we are:** Steps 0–2 done; **Step 3 (PUCT expert iteration) is
+CLIMBING again — gen-2 (sims=128 corpus) beat gen-1 by ~+12 pts/game and
+was promoted.** The arc: gen-1 climbed +4.7 over gen-0; a gen-2 attempt on
+a sims=16 corpus REGRESSED (3-way mix) then WASHED (2-way); a diagnostic
+found the sims=16 PUCT *teacher had fallen ~9 pts BELOW the raw policy*
+(the operator went negative — the policy outgrew the shallow search); a
+sims sweep showed it was just starved (−9 s16 → +12 s256), not strategy
+fusion. **Regenerating the corpus at sims=128 fixed it: gen-2(s128) vs
+gen-1 PUCT = +11.8 (t=8) / +13.1 (t=9), two seeds — promoted as the new
+champion (`pv_gen2_s128.msgpack`), nearly 3× gen-1's climb.** Value loss
+was higher (0.14) and irrelevant, as always — the +12 is all priors.
+**Next: gen-3, gen-2(s128) as generator, sims=128 corpus, 2-way mix.**
+The detailed gen-1/gen-2-fail history: Gen-0 (run 3, 20k epochs) was
+re-gated/promoted (value +13.2 vs
 V₁, policy-only +33 vs random, rollout yardstick −19.8). Gen-1 was then
 trained on a gen-0 PUCT corpus + Step-2 replay (2-way 50/50) and **beat
 gen-0 in PUCT-vs-PUCT by ~+4.6–4.9 pts/game (two seeds, t≈2.9–3.2,
@@ -30,13 +41,14 @@ reframes Step 3: **gen-1 PUCT(sims=16) plays ~9 pts WORSE than gen-1's own
 raw policy** (−9.3/−8.5, t≈−6) — the improvement operator has gone
 NEGATIVE at gen-1's strength (the policy outgrew the shallow search). So
 the sims=16 corpus is anti-signal and gen-2b couldn't climb. **Not
-promoted; gen-1 remains champion.** **Fork RESOLVED (sims sweep): too few
-sims.** gen-1 PUCT vs raw policy climbs monotone −9(s16)→+4(s64)→+10(s128)
-→+12(s256) — strategy fusion is not the problem, the operator was starved.
-**Next: regenerate the gen-1 PUCT corpus at sims=128 (the knee), keep the
-2-way 50/50 mix, retrain gen-2, re-gate.** Bonus: PUCT cost is ~linear in
-sims, not super-linear (sims=256/300 games = 432 s), so a 128-sim corpus is
-affordable. Step 1 closed
+promoted then; gen-1 was champion.** Fork RESOLVED (sims sweep): too few
+sims — gen-1 PUCT vs raw policy climbs monotone −9(s16)→+4(s64)→+10(s128)
+→+12(s256), strategy fusion is not the problem, the operator was starved.
+**This fix worked: gen-2 retrained on a sims=128 corpus (2-way 50/50)
+climbed +12 and is now champion (`pv_gen2_s128.msgpack`).** Operational
+note: the *collector* at sims=128 costs ~3 s/game/chip (much steeper than
+the arena sweep's ~600 ms — re-time the collector, not the arena); 32k
+games on a 2×4 (8 chips, pmap) ≈ 3.3 h. Step 1 closed
 as a negative result
 (see its CONCLUSION; no more V-greedy generations — though the 1k-game
 re-run showed gen 1 was +2.7, small-positive, not strictly neutral).
@@ -444,7 +456,7 @@ small-K rollout MCTS.
   early Step 3, but PUCT retrains the policy on visit distributions
   regardless.
 
-## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: gen-1 CHAMPION (+4.6–4.9, p<0.005); gen-2 (3-way) regressed, gen-2b (2-way) washed; diagnostic found PUCT sims=16 had dropped BELOW the raw policy, but sweep showed the operator was just starved (−9 s16 → +12 s256). NEXT: gen-2 corpus at sims=128, 2-way mix, re-gate]
+## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: CLIMBING. gen-1 +4.7 over gen-0; gen-2 on a sims=16 corpus regressed/washed (operator went NEGATIVE — sims=16 PUCT fell below the raw policy); diagnosed as too-few-sims; gen-2 RETRAINED on a sims=128 corpus = +11.8/+13.1 vs gen-1, PROMOTED (`pv_gen2_s128.msgpack`, CHAMPION). NEXT: gen-3, gen-2(s128) generator, sims=128 corpus, 2-way mix]
 
 Implemented 2026-06-12 in `pgx/_src/games/jass_puct.py` (`puct_search`,
 `puct_action`, `make_puct_action_fn`, `make_puct_policy_fn`,
@@ -664,6 +676,37 @@ rollout baseline at matched wall-clock.
     ~×2.4–2.5 per doubling, roughly *linear* in sims, NOT "multiplier ≈
     num_simulations". sims=256 over 300 games took just 432 s. Re-time the
     *collector* at sims=128 before assuming a 128-sim corpus is expensive.
+    (Update: the *collector* at sims=128 is much heavier than the arena —
+    ~3 s/game/chip; see the gen-2(s128) entry.)
+
+- **2026-06-17, GENERATION 2 (sims=128 corpus) — CLIMBED +12, PROMOTED
+  (new champion).** The sweep fix applied: regenerated the gen-1 PUCT corpus
+  at **sims=128** (32k games = 16×2048, K=8, τ=1.0, generated on a 2×4 via
+  `pmap` over 8 chips, ~3.3 h), retrained a fresh `PolicyValueNet` on the
+  **proven 2-way 50/50** `[gen1-PUCT-s128, step2]` mix (20k epochs; corpus
+  batches are 2048 so `split=1` keeps 2048 games/step, step2 stays
+  `split=2`). Eval value loss settled at **0.14** — higher than gen-1's
+  0.10, but on a different (sims=128) holdout and irrelevant per the
+  value-is-a-wash pattern.
+  - **Gate — gen-2(s128) PUCT vs gen-1 PUCT** (greedy, K=8/sims=64,
+    `policy_match`, 1000 games): **seed 0 +11.8 (t=8.0), seed 2 +13.1
+    (t=9.0), p≈0 — PROMOTE.** ~3× gen-1's +4.7 climb over gen-0, and the
+    decisive confirmation of the whole diagnostic chain: the sims=16
+    operator was *starved* (negative), sims=128 restored strong fuel, the
+    loop climbed harder than ever. The +12 is entirely priors (value loss
+    rose); value remains a wash.
+  - **Promoted artifact: `pv_gen2_s128.msgpack` (CHAMPION).** Confirmed
+    recipe going forward: 2-way 50/50 `[newest-PUCT-s128, step2]`,
+    **sims=128 corpus** (sims=16 is dead — it produces anti-signal once the
+    policy is strong). **Next: gen-3** with gen-2(s128) as generator, same
+    sims=128 / 2-way recipe; re-gate gen-3 vs gen-2. A second consecutive
+    sims=128 climb confirms the loop is self-sustaining.
+  - **COLLECTOR COST (corrects the earlier "re-time the collector" TODO):**
+    sims=128 data-gen measured **~3 s/game/chip** — ~5× the arena's
+    ~600 ms/game (same arena-vs-collector gap the plan saw at sims=64:
+    250 vs 504 ms), and far steeper than the arena's near-linear scaling.
+    32k games ≈ 27 h on 1 chip → ~3.3 h on a 2×4 (8 chips, `pmap`-sharded
+    collector; near-perfect 8×). Budget high-sims corpora accordingly.
 
 ## Step 4 — Scale and benchmark externally  [Status: TODO]
 

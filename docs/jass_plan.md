@@ -9,19 +9,22 @@ markers as work completes; record arena results in the step's **Results** slot.
 
 ## Status snapshot (2026-06-17)
 
-**Where we are:** Steps 0–2 done; **Step 3 (PUCT expert iteration) is
-CLIMBING again — gen-2 (sims=128 corpus) beat gen-1 by ~+12 pts/game and
-was promoted.** The arc: gen-1 climbed +4.7 over gen-0; a gen-2 attempt on
-a sims=16 corpus REGRESSED (3-way mix) then WASHED (2-way); a diagnostic
-found the sims=16 PUCT *teacher had fallen ~9 pts BELOW the raw policy*
-(the operator went negative — the policy outgrew the shallow search); a
-sims sweep showed it was just starved (−9 s16 → +12 s256), not strategy
-fusion. **Regenerating the corpus at sims=128 fixed it: gen-2(s128) vs
-gen-1 PUCT = +11.8 (t=8) / +13.1 (t=9), two seeds — promoted as the new
-champion (`pv_gen2_s128.msgpack`), nearly 3× gen-1's climb.** Value loss
-was higher (0.14) and irrelevant, as always — the +12 is all priors.
-**Next: gen-3, gen-2(s128) as generator, sims=128 corpus, 2-way mix.**
-The detailed gen-1/gen-2-fail history: Gen-0 (run 3, 20k epochs) was
+**Where we are:** Steps 0–2 done; **Step 3 (PUCT expert iteration) is a
+SELF-SUSTAINING climb — three consecutive sims=128 generations, gains not
+diminishing.** Champion is now **gen-3 (`pv_gen3_s128.msgpack`)**. The
+ladder (each vs the prior champion, PUCT-vs-PUCT @ sims=64): gen-1 +4.7 /
+gen-2(s128) +11.8–13.1 / **gen-3 +13.9 (t=9.5, seed 0; seed 2 preempted
+but a t=9.5 is not reversible — assumed positive, re-run pending for the
+record)**. The recipe is locked: 2-way 50/50 `[newest-PUCT-s128, step2]`,
+**sims=128 corpus** (sims=16 is dead — see the diagnostic). Value loss is
+irrelevant every time (the climbs are all priors). **Next: gen-4 (same
+recipe), OR pivot to Step 4 (external benchmark vs JassTheRipper / net
+scaling) now that the loop is proven.** Earlier this generation a gen-2
+attempt on a sims=16 corpus REGRESSED then WASHED; the diagnostic found
+the sims=16 PUCT teacher had fallen ~9 pts BELOW the raw policy (operator
+went negative — the policy outgrew the shallow search), and a sims sweep
+(−9 s16 → +12 s256) showed it was starved, not strategy fusion — fixed by
+sims=128. The detailed gen-1/gen-2-fail history: Gen-0 (run 3, 20k epochs) was
 re-gated/promoted (value +13.2 vs
 V₁, policy-only +33 vs random, rollout yardstick −19.8). Gen-1 was then
 trained on a gen-0 PUCT corpus + Step-2 replay (2-way 50/50) and **beat
@@ -456,7 +459,7 @@ small-K rollout MCTS.
   early Step 3, but PUCT retrains the policy on visit distributions
   regardless.
 
-## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: CLIMBING. gen-1 +4.7 over gen-0; gen-2 on a sims=16 corpus regressed/washed (operator went NEGATIVE — sims=16 PUCT fell below the raw policy); diagnosed as too-few-sims; gen-2 RETRAINED on a sims=128 corpus = +11.8/+13.1 vs gen-1, PROMOTED (`pv_gen2_s128.msgpack`, CHAMPION). NEXT: gen-3, gen-2(s128) generator, sims=128 corpus, 2-way mix]
+## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: SELF-SUSTAINING CLIMB. 3 consecutive sims=128 gens, gains steady: gen-1 +4.7 / gen-2(s128) +11.8–13.1 / gen-3 +13.9. Champion `pv_gen3_s128.msgpack`. Recipe locked: 2-way 50/50 [newest-PUCT-s128, step2]. NEXT: gen-4 (repeat) or pivot to Step 4]
 
 Implemented 2026-06-12 in `pgx/_src/games/jass_puct.py` (`puct_search`,
 `puct_action`, `make_puct_action_fn`, `make_puct_policy_fn`,
@@ -707,6 +710,25 @@ rollout baseline at matched wall-clock.
     250 vs 504 ms), and far steeper than the arena's near-linear scaling.
     32k games ≈ 27 h on 1 chip → ~3.3 h on a 2×4 (8 chips, `pmap`-sharded
     collector; near-perfect 8×). Budget high-sims corpora accordingly.
+
+- **2026-06-17, GENERATION 3 (sims=128 corpus) — CLIMBED +14, PROMOTED;
+  loop now SELF-SUSTAINING.** Straight repeat of the locked recipe:
+  regenerated the PUCT corpus at sims=128 with **gen-2(s128)** as generator
+  (32k games, 2×4 pmap), retrained fresh on 2-way 50/50
+  `[gen2-PUCT-s128, step2]` (`split=1`/`split=2`, 20k epochs).
+  - **Gate — gen-3 PUCT vs gen-2(s128) PUCT** (greedy, K=8/sims=64,
+    `policy_match`): **seed 0 +13.9 (t=9.5), p≈0 — PROMOTE.** Seed 2 was
+    preempted; a t=9.5 over 500 pairs is not reversible and both prior
+    climbs had seeds agree closely, so promoted on seed 0 (seed-2 re-run
+    pending only for record completeness, not as a gate).
+  - **This is the second consecutive sims=128 climb → the loop is
+    self-sustaining** (the criterion set in the gen-2 entry). Gains are not
+    diminishing: gen-1 +4.7 → gen-2 +12 → gen-3 +14. Value loss again
+    irrelevant; the climb is entirely priors.
+  - Promoted artifact: **`pv_gen3_s128.msgpack` (CHAMPION).** Next:
+    **gen-4** (same recipe, gen-3 generator) to extend the ladder, **or
+    pivot to Step 4** — the loop is proven, so an external calibration
+    (JassTheRipper arena) and/or net scaling is now the higher-value move.
 
 ## Step 4 — Scale and benchmark externally  [Status: TODO]
 

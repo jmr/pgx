@@ -7,7 +7,7 @@ This document is the working plan. It is written so that a fresh agent (or a
 human returning after a break) can pick up from any step. Update the **Status**
 markers as work completes; record arena results in the step's **Results** slot.
 
-## Status snapshot (2026-06-17)
+## Status snapshot (2026-06-20)
 
 **Where we are:** Steps 0–2 done; **Step 3 (PUCT expert iteration) is a
 SELF-SUSTAINING climb — three consecutive sims=128 generations, gains not
@@ -17,9 +17,33 @@ gen-2(s128) +11.8–13.1 / **gen-3 +13.9 (t=9.5, seed 0; seed 2 preempted
 but a t=9.5 is not reversible — assumed positive, re-run pending for the
 record)**. The recipe is locked: 2-way 50/50 `[newest-PUCT-s128, step2]`,
 **sims=128 corpus** (sims=16 is dead — see the diagnostic). Value loss is
-irrelevant every time (the climbs are all priors). **Next: gen-4 (same
-recipe), OR pivot to Step 4 (external benchmark vs JassTheRipper / net
-scaling) now that the loop is proven.** Earlier this generation a gen-2
+irrelevant every time (the climbs are all priors).
+
+**DECISION (2026-06-20) — gen-3 exported to JassTheRipper and externally
+calibrated; the model is the limiter (see Step 4 Results). Plan of action:**
+1. **Keep cranking the loop (gen-4, gen-5, …)** — it's the proven climber
+   and gains are NOT diminishing; the marginal generation is the cheapest
+   strength we can buy and there's no diminishing-returns signal yet.
+2. **Semi-automate the *serial* single-generation pipeline** (not a
+   hands-off chain): one resumable Colab flow `collect → train → gate`
+   that **checkpoints each stage to Drive** so a generation = one launch
+   that survives preemption. Do NOT fully automate a multi-gen chain — a
+   silently-bad generator poisons everything downstream, and colab
+   preemptions/quota make long unattended chains fragile.
+3. **Re-calibrate vs JTR POWERFUL every ~2 generations** so we track
+   ABSOLUTE strength, not just self-relative pts. Open question that
+   decides how long to crank: does +12 self-relative buy ~12 absolute pts
+   vs POWERFUL, or far less? (backfill gen-2-vs-POWERFUL + measure
+   gen-4-vs-POWERFUL to get the conversion rate.)
+4. **Queue the higher-upside bet for when loop gains flatten: net
+   scaling + the stuck value head.** The value head has been a WASH every
+   generation since Step 2, yet it IS the leaf evaluator in JTR's search —
+   so it likely caps absolute strength. Attention over the 36 card rows
+   (vs mean pool) is the natural Step-4 unlock. Cheap diagnostic first
+   (is the wash data or architecture?) before a full new architecture line
+   that restarts the generation ladder.
+
+Earlier this generation a gen-2
 attempt on a sims=16 corpus REGRESSED then WASHED; the diagnostic found
 the sims=16 PUCT teacher had fallen ~9 pts BELOW the raw policy (operator
 went negative — the policy outgrew the shallow search), and a sims sweep
@@ -730,7 +754,87 @@ rollout baseline at matched wall-clock.
     pivot to Step 4** — the loop is proven, so an external calibration
     (JassTheRipper arena) and/or net scaling is now the higher-value move.
 
-## Step 4 — Scale and benchmark externally  [Status: TODO]
+- **GEN-4 RECIPE (planned 2026-06-20) — straight repeat of the locked loop,
+  generator = gen-3.** Nothing changes but the generator; the only NEW work
+  is wrapping the three stages as one resumable, per-stage-checkpointed flow
+  (DECISION item 2). Stages (champion = `pv_gen3_s128.msgpack`):
+  1. **COLLECT (TPU 2×4, ~3.3 h).** Regenerate the PUCT corpus with gen-3 as
+     generator: `make_puct_collect_fn(pv_model.apply, gen3_params,
+     num_determinizations=8, num_simulations=128, temperature=1.0)`, **32k
+     games = 16×2048**, `pmap`-sharded over the 8 chips (~3 s/game/chip).
+     ⚠ This is the mandatory fresh half of the corpus — it's gen-3's
+     visit-distribution targets, the actual improvement signal. **Checkpoint
+     the corpus to Drive** (`corpus_puct_gen3_16x2048_s128k8.pickle`, host
+     numpy, list-of-per-batch-tuples — match the existing collector format,
+     not a concatenated 6-tuple). The **step2 corpus is the fixed 50% anchor,
+     reused as-is** (`corpus_k8_v1_24x4096.pkl`) — never regenerated.
+  2. **TRAIN (TPU, ~1 h).** Fresh `PolicyValueNet`, 2-way 50/50
+     `collect_fn=[gen3-PUCT-s128, step2]`, 20k epochs, `policy_weight=1.0`,
+     `augment=True`. Memory: corpus on HOST (numpy, never `jnp.asarray` the
+     whole thing); gen-3-PUCT batches are 2048 → `split=1`, step2 stays
+     `split=2` (keeps ≤2048 games/step under the ~12.2 G TPU). Checkpoint
+     `pv_gen4_ckpt.msgpack` to Drive (resume = rerun the same `train_pv_model`
+     call). Expect value loss ~0.14 and policy CE pinned at the soft-target
+     entropy floor — **both uninformative; do NOT gate on them** (diagnose
+     soft targets by top-1 agreement, never raw CE).
+  3. **GATE (CPU, `JAX_PLATFORMS=cpu`).** gen-4 PUCT vs gen-3 PUCT,
+     `make_puct_action_fn` greedy, **K=8 / sims=64**, via `policy_match`,
+     **1000 games, two seeds (0 and 2)**. PROMOTE on a significant positive
+     (p<0.05, expect t large if the loop holds). The V-MCTS gates (value
+     head, rollout yardstick) are SECONDARY — expect them flat (value is a
+     wash). Save the gate output to Drive alongside the checkpoint.
+  4. **CALIBRATE (every ~2 gens; do it at gen-4).** Export gen-4 to TF
+     SavedModel, run JTR `gen-4 vs POWERFUL` at 64 runs/det (≥300 paired
+     games for a ~3 pt/game effect) to get the absolute-strength conversion
+     rate vs the gen-3 −22/game baseline.
+  - **Decision after gen-4:** if it climbs again AND the JTR gap closes
+    materially → keep cranking (gen-5…). If it climbs self-relative but the
+    JTR gap barely moves → the conversion rate is poor; pivot sooner to net
+    scaling / the value head (DECISION item 4). If it WASHES → suspect the
+    sims=128 operator is now starved at gen-3's strength (re-run the
+    PUCT-vs-raw-policy sims sweep; the crossover rises as the policy
+    strengthens) → bump corpus sims before blaming the architecture.
+
+- **HOW TO SCALE STAGE 1 (collection) — the per-generation bottleneck
+  (~3.3 h, ~75% of a generation; analysis 2026-06-20).** Cost driver is the
+  PUCT search per move: K=8 determinizations × sims=128 = 1024 sims/move,
+  each a `Game.step` + a (tiny) net eval. Collection is on the critical path
+  and CANNOT be pipelined across generations (gen N+1's corpus needs gen N's
+  champion). It is, however, the one **embarrassingly parallel** stage.
+  Levers, in order of safety:
+  1. **MORE CHIPS — the clean linear win, no recipe change, no quality
+     risk.** Collection pmap's ~8× near-perfectly over games, so wall-clock
+     ÷ chips: 16 chips ≈ 1.65 h, 32 ≈ 50 min. Routes: **TPU Research Cloud
+     (TRC)** — free Cloud TPU pod slices (v5e/v4) for research, exactly this
+     use case; run the SAME pmap collector on a v5e-16/32. Or GCP paid Cloud
+     TPU. Or a Kaggle v3-8 as a *second* box — but generations are serial,
+     so a second box can't speed one collection; only useful for concurrent
+     *different* work (gate, JTR calibration, best-of-N replica).
+  2. **PROFILE FIRST (free, do before acquiring chips) — scale a saturated
+     kernel, not a half-idle one.** The net is tiny, so a small per-chip
+     batch may not fill a v5 chip. Use
+     `jass_selfplay.profile_collect_fn(collect_fn)` on **1×1** (per-chip
+     properties transfer directly to the pmap shards; it doubles batch_size
+     until OOM): (a) does raising in-flight games-per-chip lower ms/game?
+     (knee = saturation point → fill the per-chip batch for free); (b) the
+     batch_size that OOMs = the memory ceiling. **Likely cap:** mctx allocates a
+     search tree `[batch, K, sims, …]` storing the determinized `GameState`
+     embedding at every node — ~1024 nodes/game of full Jass state, so the
+     *embeddings* (not matmuls) may already cap per-chip batch against the
+     ~12.2 G ceiling. If memory headroom exists → fill it for free; if
+     already memory-bound → confirmed compute/memory-bound, chips/sims are
+     the only levers.
+  3. **QUALITY-TRADING KNOBS (gate-validate only).** sims 128 → ~96 (sweep
+     was +4@64 / +10@128; there may be a cheaper knee, but lowering sims is
+     what starved gen-2 — re-run the PUCT-vs-raw-policy sweep at gen-3's
+     strength first, the crossover rises as the policy strengthens). Fewer
+     games (16k vs 32k) — halves cost IF corpus size isn't load-bearing;
+     needs a one-off ablation.
+  4. **NOT WORTH IT:** bf16 (net too small for matmuls to bind); mctx
+     subtree reuse (re-determinize every move, nothing to carry); any
+     data-parallel trick (collection is *already* the parallel stage).
+
+## Step 4 — Scale and benchmark externally  [Status: IN PROGRESS — external benchmark DONE (gen-3 exported to JTR, calibrated 2026-06-20: weak in absolute terms, the MODEL is the limiter). Net scaling: TODO]
 
 - Net scaling: attention over the 36 card rows is the natural upgrade from
   mean pooling; then width/depth, more simulations, larger batches.
@@ -744,6 +848,44 @@ rollout baseline at matched wall-clock.
   arena where only the trump decision differs.
 
 **Results:**
+
+- **2026-06-20, gen-3 exported to JassTheRipper and externally calibrated.**
+  The export pipeline (Flax → TF SavedModel, repo commits 7f217a3 / d9498fd)
+  and a JTR-side "real PUCT" integration are done: JTR now exposes the full
+  softmax prior `P(s,a)` (`PuctPriorPolicy`), `MCTS.findChildrenPuct` uses it,
+  and cross-determinization aggregation is **summed root visit counts** (not
+  Q-sum) when a prior is active — the two changes needed to make the pgx
+  policy gain visible. (Full detail in `~/Documents/src/JassTheRipper/IDEAS.md`.)
+  - **Integration validated — gen-3 > gen-2 reproduces externally.** Both
+    sides real PUCT, RUNS mode, swapped-deal paired t-test, at 64 runs/det:
+    seed 42 −14.6 (p=0.003, 100 pairs), seed 43 −6.4 (p=0.020, 300 pairs)
+    — gen-3 ahead, **replicated** (negative = gen-3 ahead; per-pair = 2
+    games). The old argmax-tip + Q-sum setup had WASHED this (p=0.65). No
+    clean depth crossover: 64/det is the sweet spot, 128 oddly weak, 256
+    moderate (not pgx's tidy monotone sims curve). Magnitude is modest
+    (~3 pts/game) — JTR's determinized search dilutes the policy gain vs
+    pgx's own +14/game self-relative.
+  - **Absolute calibration triangle (100 games each, paired; negative =
+    name1 behind, per-game ≈ ½ the per-pair figure):**
+
+    | matchup | per-game | p |
+    |:--|:--|:--|
+    | gen-3 (value+policy) vs **POWERFUL** (classical) | **−22** | <0.0001 |
+    | gen-3 vs **FAST_TEST** (weakest MCTS) | −5 | 0.14 (ns) |
+    | **POWERFUL** vs **FAST_TEST** | +20 | <0.0001 |
+    | gen-3 @ 256 runs/det vs **POWERFUL** | −9 | 0.006 |
+
+  - **Strength ordering: POWERFUL ≫ FAST_TEST ≳ gen-3.** The pgx agent is
+    **weak in absolute terms** — loses decisively to the classical bot and
+    is even nominally behind the weakest MCTS baseline. Giving gen-3 ~13×
+    more search (20 → 256 runs/det, *exceeding* POWERFUL's own 200) only
+    halves the deficit (−22 → −9) and does NOT close it.
+  - **CONCLUSION: the model is the limiter, not the JTR integration or
+    search depth.** The integration is correct (gen-3 > gen-2 is visible);
+    gen-3 is just an early, pgx-simplified-self-play net. The lever is
+    **stronger pgx models** (more generations / net scaling), per the
+    2026-06-20 DECISION in the Status snapshot. This is the calibrated
+    external opponent the step asked for — answer: not yet competitive.
 
 ## Step 5 (optional, research-grade) — imperfect-information refinements  [Status: TODO]
 

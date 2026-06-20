@@ -511,3 +511,91 @@ def policy_match(action_fn_a, action_fn_b, key: Array, num_pairs: int):
     # First game: A is team {0,2} → +rewards[0]. Swapped game: A is team
     # {1,3} → −rewards[0].
     return jnp.stack([s_ab, -s_ba], axis=1).reshape(-1)
+
+
+def profile_collect_fn(collect_fn, *, start=16, max_batch=None, reps=2,
+                       seed=0, verbose=True):
+    """Sweep games-per-chip (batch_size) for a collect_fn, doubling until OOM.
+
+    Stage-1 (data-collection) is the per-generation bottleneck and the one
+    embarrassingly-parallel stage (docs/jass_plan.md, "HOW TO SCALE STAGE 1").
+    Before adding chips, confirm a single chip is saturated. Run this on a
+    **1x1** TPU: the per-chip properties it measures transfer directly to each
+    pmap shard of the production collector.
+
+    Two signals:
+      * ms/game vs batch_size — the *utilization* answer. While it keeps
+        dropping, the chip is starved (the net is tiny, so a small batch
+        under-fills it): raise the production per-chip batch for a free
+        speedup, same corpus. Once it flattens, the chip is saturated /
+        compute-bound and only more chips or fewer sims help.
+      * the batch_size that OOMs — the per-chip *memory ceiling* (mctx stores a
+        determinized GameState at every [batch, K, sims] tree node, so the
+        embeddings, not the matmuls, usually bind). If this lands before
+        ms/game flattens, you are memory-bound: chips/sims are the only levers.
+
+    Generic over any collector with the (key, batch_size) contract
+    (make_puct_collect_fn, make_search_collect_fn, make_policy_collect_fn, ...).
+
+    Args:
+        collect_fn: collector returned by one of the make_*_collect_fn builders.
+        start: smallest batch_size to try (doubles each step).
+        max_batch: stop after this batch_size even if it still fits
+            (None = double until OOM, the default — there is no reason to cap
+            below the actual ceiling).
+        reps: measured runs per batch_size; the min is reported (least noise).
+            The one-time compile (static batch_size recompiles per size) is
+            timed separately and excluded.
+        seed: PRNG seed.
+        verbose: print a table row per batch_size.
+
+    Returns:
+        list of per-batch dicts {batch_size, compile_s, run_s, ms_per_game,
+        peak_gb, limit_gb}; the OOM row has run_s=None and an 'error' key.
+    """
+    import time
+
+    dev = jax.local_devices()[0]
+
+    def _hbm():  # peak_bytes_in_use is a session high-water mark (no reset API)
+        s = dev.memory_stats() or {}
+        return s.get("peak_bytes_in_use", 0), s.get("bytes_limit", 0)
+
+    key = jax.random.PRNGKey(seed)
+    rows = []
+    if verbose:
+        print(f"{'B':>7} {'compile_s':>10} {'run_s':>8} {'ms/game':>9} "
+              f"{'peak_GB':>8} {'limit_GB':>9}", flush=True)
+    t_all = time.time()
+    B = start
+    while max_batch is None or B <= max_batch:
+        ks = jax.random.split(jax.random.fold_in(key, B), reps + 1)
+        try:
+            t0 = time.time()
+            jax.block_until_ready(collect_fn(ks[0], B))  # compile + warm
+            compile_s = time.time() - t0
+            run_s = float("inf")
+            for r in range(reps):
+                t0 = time.time()
+                jax.block_until_ready(collect_fn(ks[r + 1], B))
+                run_s = min(run_s, time.time() - t0)
+            peak, limit = _hbm()
+            row = dict(batch_size=B, compile_s=compile_s, run_s=run_s,
+                       ms_per_game=1000 * run_s / B,
+                       peak_gb=peak / 1e9, limit_gb=limit / 1e9)
+            rows.append(row)
+            if verbose:
+                el = time.time() - t_all
+                print(f"{B:>7} {compile_s:>10.1f} {run_s:>8.2f} "
+                      f"{row['ms_per_game']:>9.2f} {row['peak_gb']:>8.2f} "
+                      f"{row['limit_gb']:>9.2f}   [{el:.0f}s elapsed]", flush=True)
+        except Exception as e:  # noqa: BLE001 — RESOURCE_EXHAUSTED etc. = ceiling
+            rows.append(dict(batch_size=B, compile_s=None, run_s=None,
+                             ms_per_game=None, peak_gb=None, limit_gb=None,
+                             error=str(e)[:160]))
+            if verbose:
+                print(f"{B:>7}  OOM/err -> per-chip ceiling is below B={B}: "
+                      f"{str(e)[:80]}", flush=True)
+            break
+        B *= 2
+    return rows

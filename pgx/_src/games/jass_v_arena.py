@@ -45,12 +45,21 @@ def make_random_agent(K: int, N: int):
     return agent
 
 
-def make_v_agent(K: int, params, model: ValueNet):
-    """Agent using a trained value network at the leaf."""
+def make_v_agent(K: int, params, v_apply):
+    """Agent using a trained value network at the leaf.
+
+    Args:
+        K:       Number of determinizations.
+        params:  Network parameter tree.
+        v_apply: Callable ``(params, cm, hd) -> (B,) value``.
+                 Pass ``ValueNet().apply`` for a standalone value net or
+                 ``lambda p, cm, hd: PolicyValueNet().apply(p, cm, hd)[1]``
+                 for the value head of a joint policy+value net.
+    """
     def agent(state, player_id, key):
         return best_action(state, player_id, key,
                            num_determinizations=K, num_rollouts=1,
-                           v_params=params, v_apply=model.apply,
+                           v_params=params, v_apply=v_apply,
                            v_scale=TARGET_SCALE)
     return agent
 
@@ -158,7 +167,7 @@ def print_stats(label_c: str, label_b: str, scores: np.ndarray):
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 def run_arena(params, *, baseline_params=None, k_v=64, k_base=8, n_base=8,
-              games=1000, hours=4.0, seed=0):
+              games=1000, hours=4.0, seed=0, v_apply=None, baseline_v_apply=None):
     """Run a V-MCTS challenger against a baseline agent.
 
     Default baseline is random-rollout MCTS (K=k_base, N=n_base). Pass
@@ -167,10 +176,17 @@ def run_arena(params, *, baseline_params=None, k_v=64, k_base=8, n_base=8,
 
         run_arena(v1_params, baseline_params=v0_params, k_v=64, k_base=64)
 
+    For PolicyValueNet models (gen2/gen3) pass the value-head apply function:
+
+        pv = PolicyValueNet()
+        run_arena(gen3_params, baseline_params=gen2_params,
+                  v_apply=lambda p, cm, hd: pv.apply(p, cm, hd)[1],
+                  baseline_v_apply=lambda p, cm, hd: pv.apply(p, cm, hd)[1])
+
     Args:
-        params:  Flax parameter tree for the challenger's ValueNet.
-        baseline_params: Optional ValueNet params for a V-MCTS baseline
-            (K=k_base, N=1). None = random-rollout baseline.
+        params:  Flax parameter tree for the challenger's network.
+        baseline_params: Optional params for a V-MCTS baseline (K=k_base, N=1).
+            None = random-rollout baseline.
         k_v:     Determinizations for V-MCTS challenger.
         k_base:  Determinizations for the baseline.
         n_base:  Rollouts per action for the random-rollout baseline
@@ -178,12 +194,19 @@ def run_arena(params, *, baseline_params=None, k_v=64, k_base=8, n_base=8,
         games:   Maximum number of games to play.
         hours:   Time budget in hours.
         seed:    PRNG seed.
+        v_apply: Apply fn for the challenger's value leaf,
+            ``(params, cm, hd) -> (B,) value``. Defaults to ValueNet().apply.
+        baseline_v_apply: Apply fn for the baseline's value leaf.
+            Defaults to v_apply (same model class for both sides).
 
     Returns:
         np.ndarray of per-game score differentials from the challenger's
         perspective (positive = challenger won).
     """
-    model = ValueNet()
+    if v_apply is None:
+        v_apply = ValueNet().apply
+    if baseline_v_apply is None:
+        baseline_v_apply = v_apply
 
     # ── Warm-up compilation ───────────────────────────────────────────────
     print("Compiling ...", flush=True)
@@ -192,25 +215,25 @@ def run_arena(params, *, baseline_params=None, k_v=64, k_base=8, n_base=8,
     t0     = time.perf_counter()
     best_action(state0, state0.current_player, jax.random.PRNGKey(0),
                 num_determinizations=k_v, num_rollouts=1,
-                v_params=params, v_apply=model.apply, v_scale=TARGET_SCALE)
+                v_params=params, v_apply=v_apply, v_scale=TARGET_SCALE)
     if baseline_params is None:
         best_action(state0, state0.current_player, jax.random.PRNGKey(0),
                     num_determinizations=k_base, num_rollouts=n_base)
-    elif k_base != k_v:
+    elif k_base != k_v or baseline_v_apply is not v_apply:
         best_action(state0, state0.current_player, jax.random.PRNGKey(0),
                     num_determinizations=k_base, num_rollouts=1,
-                    v_params=baseline_params, v_apply=model.apply,
+                    v_params=baseline_params, v_apply=baseline_v_apply,
                     v_scale=TARGET_SCALE)
     jax.effects_barrier()
     print(f"  Compiled in {time.perf_counter()-t0:.1f}s\n", flush=True)
 
     # ── Run arena ─────────────────────────────────────────────────────────
-    challenger = make_v_agent(k_v, params, model)
+    challenger = make_v_agent(k_v, params, v_apply)
     if baseline_params is None:
         baseline = make_random_agent(k_base, n_base)
         label_b  = f"random K={k_base} N={n_base}"
     else:
-        baseline = make_v_agent(k_base, baseline_params, model)
+        baseline = make_v_agent(k_base, baseline_params, baseline_v_apply)
         label_b  = f"V-MCTS K={k_base} (baseline weights)"
 
     label_c = f"V-MCTS K={k_v}"

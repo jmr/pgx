@@ -7,17 +7,33 @@ This document is the working plan. It is written so that a fresh agent (or a
 human returning after a break) can pick up from any step. Update the **Status**
 markers as work completes; record arena results in the step's **Results** slot.
 
-## Status snapshot (2026-06-20)
+## Status snapshot (2026-06-21)
 
-**Where we are:** Steps 0–2 done; **Step 3 (PUCT expert iteration) is a
-SELF-SUSTAINING climb — three consecutive sims=128 generations, gains not
-diminishing.** Champion is now **gen-3 (`pv_gen3_s128.msgpack`)**. The
-ladder (each vs the prior champion, PUCT-vs-PUCT @ sims=64): gen-1 +4.7 /
-gen-2(s128) +11.8–13.1 / **gen-3 +13.9 (t=9.5, seed 0; seed 2 preempted
-but a t=9.5 is not reversible — assumed positive, re-run pending for the
-record)**. The recipe is locked: 2-way 50/50 `[newest-PUCT-s128, step2]`,
-**sims=128 corpus** (sims=16 is dead — see the diagnostic). Value loss is
-irrelevant every time (the climbs are all priors).
+**Where we are:** Steps 0–2 done; **Step 3 (PUCT expert iteration) climbed
+hard for three generations then DECELERATED at gen-4.** Champion is now
+**gen-4 (`pv_gen4_s128.msgpack`)**, promoted but marginal. The ladder (each
+vs the prior champion, PUCT-vs-PUCT @ sims=64): gen-1 +4.7 / gen-2(s128)
++11.8–13.1 / gen-3 +13.9 / **gen-4 ~+3.5 (seed 0 +2.6 t=1.9 p=0.06 ns,
+seed 2 +4.4 t=2.9 p=0.0035) — a real but weak climb, back to gen-1-size
+gains.** The recipe is locked: 2-way 50/50 `[newest-PUCT-s128, step2]`,
+**sims=128 corpus**. Value loss is irrelevant every time (the climbs are
+all priors).
+
+**gen-4's deceleration is the "gains flatten" trigger.** ~+3.5 on a
+sims=128 corpus mirrors gen-1's +4.7 on a sims=16 corpus — the generation
+right before sims=16 went negative and stalled. Leading hypothesis: the
+operator is starved AGAIN (the PUCT-vs-raw crossover rises with policy
+strength, exactly as warned; sims=128-over-gen-3 ≈ sims=16-over-gen-1).
+**NEXT — the cheap decisive diagnostic (CPU, `policy_match`, no new
+training): gen-3 PUCT vs gen-3 RAW policy, swept sims 128/256/384.** If 128
+is weak and 256+ climbs → starved operator → regenerate corpus at sims=256
+(~1.5 h now, with the 5× collection win) and retrain. If even 256 barely
+beats raw → architecture ceiling → pivot to net scaling (testable on this
+very corpus). Strategic overlay: sims-bumping is a CONSUMABLE fix (the
+crossover keeps rising — a treadmill); net scaling is STRUCTURAL. With JTR
+saying the model is the limiter + the value head stuck since Step 2 + this
+deceleration, the pivot to net scaling is plausibly due now; the diagnostic
+just says whether there's one cheap sims-bumped generation left first.
 
 **DECISION (2026-06-20) — gen-3 exported to JassTheRipper and externally
 calibrated; the model is the limiter (see Step 4 Results). Plan of action:**
@@ -483,7 +499,7 @@ small-K rollout MCTS.
   early Step 3, but PUCT retrains the policy on visit distributions
   regardless.
 
-## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: SELF-SUSTAINING CLIMB. 3 consecutive sims=128 gens, gains steady: gen-1 +4.7 / gen-2(s128) +11.8–13.1 / gen-3 +13.9. Champion `pv_gen3_s128.msgpack`. Recipe locked: 2-way 50/50 [newest-PUCT-s128, step2]. NEXT: gen-4 (repeat) or pivot to Step 4]
+## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: CLIMBED 3 gens then DECELERATED at gen-4 (+4.7 / +12 / +14 / ~+3.5). Champion `pv_gen4_s128.msgpack`. NEXT: operator diagnostic (gen-3 PUCT vs raw, sweep sims 128/256/384) → sims-bump (256) vs pivot to net scaling (Step 4)]
 
 Implemented 2026-06-12 in `pgx/_src/games/jass_puct.py` (`puct_search`,
 `puct_action`, `make_puct_action_fn`, `make_puct_policy_fn`,
@@ -794,6 +810,40 @@ rollout baseline at matched wall-clock.
     sims=128 operator is now starved at gen-3's strength (re-run the
     PUCT-vs-raw-policy sims sweep; the crossover rises as the policy
     strengthens) → bump corpus sims before blaming the architecture.
+
+- **2026-06-21, GENERATION 4 (sims=128 corpus) — PROMOTED but DECELERATED;
+  the loop has flattened.** Straight repeat of the locked recipe (gen-3
+  generator, sims=128, 2-way 50/50, 20k epochs), and the first corpus
+  collected at the profiled **64 games/chip** optimum (~48 min vs 3.3 h; see
+  HOW TO SCALE STAGE 1). Operational notes: training died at 5k epochs and
+  was **resumed** from the `checkpoint_every=500` checkpoint (RNG
+  fast-forward); an early gate read was a false alarm off **stale scrollback**
+  (it matched gen-3's +13.9/t=9.5 exactly — the tell). A separate near-miss:
+  a 9 s "training" run that had silently resumed a *completed* gen-3
+  checkpoint because `checkpoint_path` wasn't bumped to the gen-4 file —
+  caught before gating (would have been gen-3-vs-gen-3). Lesson reinforced:
+  derive every path from a single `GEN` anchor (`SRC = GEN-1`), and print
+  net fingerprints at gate time.
+  - **Gate — gen-4 PUCT vs gen-3 PUCT** (greedy K=8/sims=64, `policy_match`,
+    500 pairs/seed): **seed 0 +2.6 (t=1.9, p=0.06, win 50.9%, sign p=0.16,
+    ns), seed 2 +4.4 (t=2.9, p=0.0035, win 53.4%, sign p=0.0078).** Both
+    seeds positive, seed 2 significant → **PROMOTE (`pv_gen4_s128.msgpack`)**,
+    but ~+3.5 combined is a hard drop from gen-3's +14 — back to gen-1-size
+    gains. ⚠ Training-health confirm still pending (did eval value loss
+    settle ~0.14 / top-1 agreement healthy?) to rule out the death/resume
+    understating the climb.
+  - **Read: this is the deceleration the gen-4 plan flagged.** ~+3.5 on
+    sims=128 ≈ gen-1's +4.7 on sims=16 — one generation before the sims=16
+    stall. Leading hypothesis: the operator is starved again (crossover rose
+    with policy strength). **NEXT — operator diagnostic (CPU): gen-3 PUCT vs
+    gen-3 RAW policy, swept sims 128/256/384.** 128 weak & 256+ climbing →
+    starved → corpus to sims=256 (~1.5 h with the 5× collection win),
+    retrain. Even 256 barely beating raw → architecture ceiling → pivot to
+    net scaling (Step 4; testable on this corpus). Strategic overlay:
+    sims-bumping is consumable (treadmill — the crossover keeps rising), net
+    scaling is structural; with JTR (model is the limiter) + stuck value head
+    + this deceleration, the net-scaling pivot is plausibly due — the
+    diagnostic decides whether one cheap sims-bumped generation comes first.
 
 - **HOW TO SCALE STAGE 1 (collection) — the per-generation bottleneck
   (~3.3 h, ~75% of a generation; analysis 2026-06-20).** Cost driver is the

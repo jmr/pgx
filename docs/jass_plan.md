@@ -14,26 +14,43 @@ hard for three generations then DECELERATED at gen-4.** Champion is now
 **gen-4 (`pv_gen4_s128.msgpack`)**, promoted but marginal. The ladder (each
 vs the prior champion, PUCT-vs-PUCT @ sims=64): gen-1 +4.7 / gen-2(s128)
 +11.8–13.1 / gen-3 +13.9 / **gen-4 ~+3.5 (seed 0 +2.6 t=1.9 p=0.06 ns,
-seed 2 +4.4 t=2.9 p=0.0035) — a real but weak climb, back to gen-1-size
-gains.** The recipe is locked: 2-way 50/50 `[newest-PUCT-s128, step2]`,
-**sims=128 corpus**. Value loss is irrelevant every time (the climbs are
-all priors).
+seed 2 +4.4 t=2.9 p=0.0035) — *at the PUCT@64 gate; see REFRAME below: that
+gate now masks policy gains, gen-4's raw policy is +15 over gen-3.*** The
+recipe is locked: 2-way 50/50 `[newest-PUCT-s128, step2]`, **sims=128
+corpus**. Value loss is irrelevant every time (the climbs are all priors).
 
-**gen-4's deceleration is the "gains flatten" trigger.** ~+3.5 on a
-sims=128 corpus mirrors gen-1's +4.7 on a sims=16 corpus — the generation
-right before sims=16 went negative and stalled. Leading hypothesis: the
-operator is starved AGAIN (the PUCT-vs-raw crossover rises with policy
-strength, exactly as warned; sims=128-over-gen-3 ≈ sims=16-over-gen-1).
-**NEXT — the cheap decisive diagnostic (CPU, `policy_match`, no new
-training): gen-3 PUCT vs gen-3 RAW policy, swept sims 128/256/384.** If 128
-is weak and 256+ climbs → starved operator → regenerate corpus at sims=256
-(~1.5 h now, with the 5× collection win) and retrain. If even 256 barely
-beats raw → architecture ceiling → pivot to net scaling (testable on this
-very corpus). Strategic overlay: sims-bumping is a CONSUMABLE fix (the
-crossover keeps rising — a treadmill); net scaling is STRUCTURAL. With JTR
-saying the model is the limiter + the value head stuck since Step 2 + this
-deceleration, the pivot to net scaling is plausibly due now; the diagnostic
-just says whether there's one cheap sims-bumped generation left first.
+**REFRAME (2026-06-21, diagnostics in) — gen-4 did NOT stall; the GATE went
+blind.** Two CPU diagnostics on the existing nets settled it: (1) **operator
+NOT starved** — gen-3 PUCT@128 vs gen-3 raw = **+26.3 (t=13.9)**, *bigger*
+than gen-1's +10, so sims-bumping is OFF (more sims only widens the gap).
+(2) **the policy is still climbing hard** — gen-4 raw vs gen-3 raw
+(policy-only, no search, τ=0.05) = **+15.0 (t=8.9)**. So the +3.5
+PUCT-vs-PUCT gate was a MEASUREMENT ARTIFACT: at sims=64 the search
+compensates for prior quality, compressing a +15 raw-policy gain to +3.5
+searched. **PUCT@64 has lost sensitivity to policy gains** as the policy got
+strong (early on weak priors were load-bearing in PUCT@64; no longer).
+Training health fine: gen-4 eval value loss 0.1393 ≈ 0.14, so the
+death/resume did not understate it. This **supersedes the sims-vs-arch fork
+below** (that was the pre-diagnostic plan).
+
+**What it means + NEXT STEPS:**
+1. **Loop is alive — keep cranking (gen-5).** Policy improving ~+15/gen raw,
+   NOT saturated; no *policy* architecture ceiling yet. BUT **switch the
+   progress gate to raw-vs-raw** (gen-5 raw vs gen-4 raw, τ=0.05,
+   `policy_match`) — keep PUCT@64 only as a deployed-strength check, not the
+   climb signal. (Low-sims PUCT, 8–16, is an alternative sensitive gate.)
+2. **The deployed (searched) agent gained only +3.5 — and THAT now fingers
+   the VALUE head.** Policy is fine, so the cap on *searched* play is PUCT's
+   other input: the value head, **stuck since Step 2**. → **net scaling
+   targeting the VALUE head** (attention over the 36 card rows vs mean pool),
+   validated on the *existing* corpus (held-out value MSE + the
+   searched-strength yardstick). This is the higher-upside track now.
+3. **Efficiency read (pocket):** a +15-better prior buys the same searched
+   strength at FEWER sims (priors load-bearing at low sims) — JTR's "quality
+   at fewer playouts" lever.
+
+Per-generation procedure (collect → train → gate) is now a runbook:
+**`docs/jass_sop.md`** — follow it for gen-5.
 
 **DECISION (2026-06-20) — gen-3 exported to JassTheRipper and externally
 calibrated; the model is the limiter (see Step 4 Results). Plan of action:**
@@ -499,7 +516,7 @@ small-K rollout MCTS.
   early Step 3, but PUCT retrains the policy on visit distributions
   regardless.
 
-## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: CLIMBED 3 gens then DECELERATED at gen-4 (+4.7 / +12 / +14 / ~+3.5). Champion `pv_gen4_s128.msgpack`. NEXT: operator diagnostic (gen-3 PUCT vs raw, sweep sims 128/256/384) → sims-bump (256) vs pivot to net scaling (Step 4)]
+## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: LOOP ALIVE — gen-4 PUCT@64 gate read +3.5 but the gate went BLIND; gen-4 *raw* policy is +15 over gen-3, operator NOT starved (+26). Champion `pv_gen4_s128.msgpack`. NEXT: gen-5 gated raw-vs-raw + net scaling on the VALUE head. Procedure → docs/jass_sop.md]
 
 Implemented 2026-06-12 in `pgx/_src/games/jass_puct.py` (`puct_search`,
 `puct_action`, `make_puct_action_fn`, `make_puct_policy_fn`,
@@ -844,6 +861,26 @@ rollout baseline at matched wall-clock.
     scaling is structural; with JTR (model is the limiter) + stuck value head
     + this deceleration, the net-scaling pivot is plausibly due — the
     diagnostic decides whether one cheap sims-bumped generation comes first.
+  - **DIAGNOSTICS IN (2026-06-21 evening) — REFRAME: gen-4 did NOT stall; the
+    PUCT@64 GATE went blind.** Both diagnostics on CPU, existing nets:
+    - **Operator (gen-3 PUCT@128 vs gen-3 raw, 300 pairs): +26.3, t=13.9**
+      — *bigger* than gen-1's +10. Operator NOT starved; sims-bumping is OFF
+      (more sims only widens the +26 gap, doesn't help the loop convert it).
+      So s256/s384 were not needed (s128 already settled it) — the
+      interrupted sweep cost nothing.
+    - **Policy (gen-4 raw vs gen-3 raw, policy-only τ=0.05, 300 pairs):
+      +15.0, t=8.9** — the policy is still climbing *hard*. The +3.5
+      PUCT-vs-PUCT gate was a MEASUREMENT ARTIFACT: at sims=64 the search
+      compensates for prior quality, compressing a +15 raw gain to +3.5
+      searched. PUCT@64 has lost sensitivity to policy gains.
+    - **Verdict:** loop is alive (policy ~+15/gen, not saturated), but (a)
+      **gate gen-5 raw-vs-raw**, not PUCT@64; and (b) the *searched* agent's
+      +3.5 fingers the **VALUE head** (stuck since Step 2) as the cap on
+      deployed strength → **net scaling on the value head** (attention vs
+      mean pool, validated on the existing corpus). Supersedes the
+      sims-vs-arch fork above (sims branch is dead). Training health fine
+      (gen-4 eval value loss 0.1393 ≈ 0.14). See the Status snapshot REFRAME
+      and `docs/jass_sop.md`.
 
 - **HOW TO SCALE STAGE 1 (collection) — the per-generation bottleneck
   (~3.3 h, ~75% of a generation; analysis 2026-06-20).** Cost driver is the

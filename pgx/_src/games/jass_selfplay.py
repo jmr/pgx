@@ -514,25 +514,29 @@ def policy_match(action_fn_a, action_fn_b, key: Array, num_pairs: int):
 
 
 def profile_collect_fn(collect_fn, *, start=16, max_batch=None, reps=2,
-                       seed=0, verbose=True):
-    """Sweep games-per-chip (batch_size) for a collect_fn, doubling until OOM.
+                       seed=0, stop_when_worse=True, patience=1, verbose=True):
+    """Sweep games-per-chip (batch_size) to find the ms/game OPTIMUM.
 
     Stage-1 (data-collection) is the per-generation bottleneck and the one
     embarrassingly-parallel stage (docs/jass_plan.md, "HOW TO SCALE STAGE 1").
-    Before adding chips, confirm a single chip is saturated. Run this on a
-    **1x1** TPU: the per-chip properties it measures transfer directly to each
+    Before adding chips, find the per-chip batch that minimises ms/game. Run on
+    a **1x1** TPU: the per-chip properties it measures transfer directly to each
     pmap shard of the production collector.
 
-    Two signals:
-      * ms/game vs batch_size — the *utilization* answer. While it keeps
-        dropping, the chip is starved (the net is tiny, so a small batch
-        under-fills it): raise the production per-chip batch for a free
-        speedup, same corpus. Once it flattens, the chip is saturated /
-        compute-bound and only more chips or fewer sims help.
-      * the batch_size that OOMs — the per-chip *memory ceiling* (mctx stores a
-        determinized GameState at every [batch, K, sims] tree node, so the
-        embeddings, not the matmuls, usually bind). If this lands before
-        ms/game flattens, you are memory-bound: chips/sims are the only levers.
+    The signal is ms/game vs batch_size, and it is NOT monotonic: the PUCT
+    collector is bound by the on-chip-memory (VMEM) working set of the mctx
+    tree ([batch, K, sims] of GameState embeddings), not HBM. So ms/game falls
+    as the batch fills the chip, hits a sharp minimum when the tree still fits
+    fast scratchpad, then jumps *up* (superlinearly) once it spills to HBM —
+    while HBM usage stays tiny, so OOM never comes. Measured 2026-06-21 at
+    K=8/sims=128: min at B=64 (563 ms/game), then 128→2048, 256→2885 (a peak,
+    not a plateau). The optimum couples B,K,sims (≈ a fixed tree working set,
+    B*K≈512) — re-profile when num_determinizations or num_simulations change.
+
+    Therefore stop at the minimum (stop_when_worse), do NOT "double until OOM":
+    OOM is unreachable here and the post-minimum points are exponentially
+    expensive (the 2026-06-21 unbounded run wasted ~6 h past a knee visible at
+    the second point).
 
     Generic over any collector with the (key, batch_size) contract
     (make_puct_collect_fn, make_search_collect_fn, make_policy_collect_fn, ...).
@@ -540,18 +544,25 @@ def profile_collect_fn(collect_fn, *, start=16, max_batch=None, reps=2,
     Args:
         collect_fn: collector returned by one of the make_*_collect_fn builders.
         start: smallest batch_size to try (doubles each step).
-        max_batch: stop after this batch_size even if it still fits
-            (None = double until OOM, the default — there is no reason to cap
-            below the actual ceiling).
+        max_batch: hard cap on batch_size (None = no cap; rely on
+            stop_when_worse / OOM to terminate).
         reps: measured runs per batch_size; the min is reported (least noise).
             The one-time compile (static batch_size recompiles per size) is
             timed separately and excluded.
         seed: PRNG seed.
+        stop_when_worse: stop once ms/game has risen above the running minimum
+            for `patience` consecutive steps (the optimum is behind us). True
+            by default — this is what keeps the sweep from running away on a
+            VMEM-bound workload. Set False to force a full sweep to max_batch.
+        patience: consecutive worse-than-best steps tolerated before stopping.
+            1 (default) stops right after the first regression — cheapest, but
+            a single noisy high sample can trip it; raise to 2 with low `reps`
+            if the curve is noisy (each extra step past the min is costly).
         verbose: print a table row per batch_size.
 
     Returns:
         list of per-batch dicts {batch_size, compile_s, run_s, ms_per_game,
-        peak_gb, limit_gb}; the OOM row has run_s=None and an 'error' key.
+        peak_gb, limit_gb}; an OOM row has run_s=None and an 'error' key.
     """
     import time
 
@@ -568,6 +579,7 @@ def profile_collect_fn(collect_fn, *, start=16, max_batch=None, reps=2,
               f"{'peak_GB':>8} {'limit_GB':>9}", flush=True)
     t_all = time.time()
     B = start
+    best_ms, best_b, worse = float("inf"), None, 0
     while max_batch is None or B <= max_batch:
         ks = jax.random.split(jax.random.fold_in(key, B), reps + 1)
         try:
@@ -589,13 +601,23 @@ def profile_collect_fn(collect_fn, *, start=16, max_batch=None, reps=2,
                 print(f"{B:>7} {compile_s:>10.1f} {run_s:>8.2f} "
                       f"{row['ms_per_game']:>9.2f} {row['peak_gb']:>8.2f} "
                       f"{row['limit_gb']:>9.2f}   [{el:.0f}s elapsed]", flush=True)
-        except Exception as e:  # noqa: BLE001 — RESOURCE_EXHAUSTED etc. = ceiling
+        except Exception as e:  # noqa: BLE001 — RESOURCE_EXHAUSTED etc.
             rows.append(dict(batch_size=B, compile_s=None, run_s=None,
                              ms_per_game=None, peak_gb=None, limit_gb=None,
                              error=str(e)[:160]))
             if verbose:
-                print(f"{B:>7}  OOM/err -> per-chip ceiling is below B={B}: "
-                      f"{str(e)[:80]}", flush=True)
+                print(f"{B:>7}  OOM/err at B={B} (rare — this workload is "
+                      f"VMEM-bound, not HBM): {str(e)[:80]}", flush=True)
             break
+        if row["ms_per_game"] < best_ms:
+            best_ms, best_b, worse = row["ms_per_game"], B, 0
+        elif stop_when_worse:
+            worse += 1
+            if worse >= patience:
+                if verbose:
+                    print(f"        stop: ms/game past its min "
+                          f"({best_ms:.0f} @ B={best_b}) for {worse} step(s) "
+                          f"-> optimum is B={best_b}", flush=True)
+                break
         B *= 2
     return rows

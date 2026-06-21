@@ -801,29 +801,43 @@ rollout baseline at matched wall-clock.
   each a `Game.step` + a (tiny) net eval. Collection is on the critical path
   and CANNOT be pipelined across generations (gen N+1's corpus needs gen N's
   champion). It is, however, the one **embarrassingly parallel** stage.
-  Levers, in order of safety:
-  1. **MORE CHIPS — the clean linear win, no recipe change, no quality
-     risk.** Collection pmap's ~8× near-perfectly over games, so wall-clock
-     ÷ chips: 16 chips ≈ 1.65 h, 32 ≈ 50 min. Routes: **TPU Research Cloud
-     (TRC)** — free Cloud TPU pod slices (v5e/v4) for research, exactly this
-     use case; run the SAME pmap collector on a v5e-16/32. Or GCP paid Cloud
+
+  **MEASURED (2026-06-21, 1×1 batch sweep via `profile_collect_fn` at the
+  production K=8/sims=128 settings) — there is a sharp per-chip OPTIMUM at
+  B=64 games/chip, and the production collector was running ~5× SLOW.**
+  ms/game vs games-per-chip: 16→732, 32→656, **64→563 (min)**, 128→2048,
+  256→2885, 512→3320, 1024→4401. It is a sharp peak, not a plateau:
+  everything above 64 degrades *superlinearly*. **Not memory** — peak HBM was
+  0.41 G at B=1024 vs the 16.9 G limit. The cliff is the on-chip-memory
+  (VMEM) working set: the mctx tree `[B, K, sims]` of `GameState` embeddings
+  fits fast scratchpad at B=64 and spills to HBM in (64,128), so every sim
+  step starts streaming. **The optimum couples B,K,sims (≈ a fixed tree
+  working-set, B×K≈512) — re-profile if `num_determinizations` or
+  `num_simulations` change** (lower sims → bigger optimal B, higher sims →
+  smaller). Production ran `16×2048` pmap'd over 8 chips = **256 games/chip**
+  = 2885 ms/game ≈ 2.9 s/game/chip — exactly the recorded ~3 s/game/chip, so
+  the gen-2/3 corpus was generated ~5× slower than necessary. **B=64/chip =
+  0.563 s/game/chip → 32k games on the 2×4 in ~38 min (was 3.3 h), free, no
+  new hardware.** ⚠ Confirm with one real pmap'd collection at 64/chip (512
+  total) before rebuilding a corpus on it.
+
+  Levers, **REORDERED by the measurement** (batch-fix first, then chips):
+  1. **SET PER-CHIP BATCH TO ~64 — the free ~5× win, no recipe change, no
+     quality risk.** This is now the first move. Find it with
+     `jass_selfplay.profile_collect_fn(collect_fn, max_batch=…)` on **1×1**
+     (per-chip numbers transfer to each pmap shard). ⚠ Do NOT use the
+     "double until OOM" default here: this workload is VMEM-bound with a
+     sharp optimum, OOM never comes, and the sweep marched 6 h overnight
+     past a knee visible at 128 — bound the sweep and stop once ms/game
+     rises past its min.
+  2. **MORE CHIPS — the clean linear win on top of the batch fix.**
+     Collection pmap's ~8× near-perfectly over games, so wall-clock ÷ chips
+     (on top of the ~38 min @ 64/chip). Routes: **TPU Research Cloud (TRC)**
+     — free Cloud TPU pod slices (v5e/v4) for research, exactly this use
+     case; run the SAME pmap collector on a v5e-16/32. Or GCP paid Cloud
      TPU. Or a Kaggle v3-8 as a *second* box — but generations are serial,
      so a second box can't speed one collection; only useful for concurrent
      *different* work (gate, JTR calibration, best-of-N replica).
-  2. **PROFILE FIRST (free, do before acquiring chips) — scale a saturated
-     kernel, not a half-idle one.** The net is tiny, so a small per-chip
-     batch may not fill a v5 chip. Use
-     `jass_selfplay.profile_collect_fn(collect_fn)` on **1×1** (per-chip
-     properties transfer directly to the pmap shards; it doubles batch_size
-     until OOM): (a) does raising in-flight games-per-chip lower ms/game?
-     (knee = saturation point → fill the per-chip batch for free); (b) the
-     batch_size that OOMs = the memory ceiling. **Likely cap:** mctx allocates a
-     search tree `[batch, K, sims, …]` storing the determinized `GameState`
-     embedding at every node — ~1024 nodes/game of full Jass state, so the
-     *embeddings* (not matmuls) may already cap per-chip batch against the
-     ~12.2 G ceiling. If memory headroom exists → fill it for free; if
-     already memory-bound → confirmed compute/memory-bound, chips/sims are
-     the only levers.
   3. **QUALITY-TRADING KNOBS (gate-validate only).** sims 128 → ~96 (sweep
      was +4@64 / +10@128; there may be a cheaper knee, but lowering sims is
      what starved gen-2 — re-run the PUCT-vs-raw-policy sweep at gen-3's

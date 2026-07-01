@@ -15,9 +15,15 @@ SRC = GEN - 1      # champion: generator, corpus name, gate opponent
 ```
 
 Then all filenames are f-strings: `pv_gen{SRC}_s128.msgpack` (champion),
-`corpus_puct_gen{SRC}_16x2048_s128k8.pickle` (named by its *generator*),
-`pv_gen{GEN}_s128_ckpt.msgpack` (new checkpoint / final). Params are
-**role-named**: `src_params`, `new_params` — not `gen3_params`.
+`corpus_puct_gen{SRC}_16x2048_s128k8.pickle` (named by its *generator*). The
+new generation has **two distinct files — don't confuse them**:
+`pv_gen{GEN}_s128_ckpt.msgpack` is the resumable **training checkpoint**
+(`checkpoint_path=`, written every 500 epochs), and `pv_gen{GEN}_s128.msgpack`
+is the **final net saved right after training completes** — *that* is the one
+you **gate**, and keep as champion on a win. So the gate/diagnostic cells load
+`new_params` from `pv_gen{GEN}_s128.msgpack`, **not** the `_ckpt` file (the
+`_ckpt` may not even survive to gate time). Params are **role-named**:
+`src_params`, `new_params` — not `gen3_params`.
 
 > Two bugs this prevents (both hit on 2026-06-20): a 9 s "training" run that
 > silently resumed a *completed* `pv_gen{SRC}` checkpoint because the path
@@ -90,7 +96,17 @@ print_stats(f"gen-{GEN} raw", f"gen-{SRC} raw",
 
 ## Diagnostics (when a gate looks off)
 
-All CPU, `policy_match`, on existing nets — no training/collection:
+All CPU, `policy_match`, on existing nets — no training/collection.
+
+**Scale PUCT games by SEED-LOOPING, never by raising `num_pairs`.**
+`policy_match` vmaps all pairs into one XLA op, so memory scales with
+`num_pairs`; a PUCT@128 (K=8) working set OOMs/swaps the CPU colab runtime
+above ~80–100 pairs — it manifests as a cell that *runs but never finishes and
+won't respond to interrupt* (the interrupt only fires between Python ops; a
+monolithic vmap gives no such window). Instead loop seeds at ≤80 pairs and
+pool: `np.concatenate([policy_match(a, b, PRNGKey(s), 80) for s in range(3)])`
+→ 240 pairs at the memory cost of 80, and interruptible between chunks. (Raw
+`policy_match` is cheap and safe at 300.) Diagnostics:
 
 - **Operator (starved?):** gen-`SRC` PUCT vs gen-`SRC` RAW, swept sims. A
   *small/negative* margin = starved → bump corpus sims. A *large* margin
@@ -99,10 +115,20 @@ All CPU, `policy_match`, on existing nets — no training/collection:
   raw. Large + while PUCT-vs-PUCT is flat = the search is masking real policy
   gains (this is now the standing gate, above).
 
-## Current strategic state (2026-06-21)
+## Current strategic state (2026-07-01)
 
-Loop is alive (policy ~+15/gen raw, not saturated). The **searched** agent is
-capped by the **value head** (stuck since Step 2). Next high-value track
-beyond cranking gen-5: **net scaling on the value head** (attention over the
-36 card rows vs mean pool), validated on the existing corpus via held-out
-value MSE + the searched-strength yardstick. See jass_plan Step 4.
+**Policy expert-iteration SATURATED at gen-5** (raw gate flat; see jass_plan
+gen-5 VERDICT). The operator is still +11 but its residual edge sits in
+*diffuse* visit targets (peak 0.37 on the corrected positions), so it carries
+no argmax distillation gradient — the student is at a CE optimum (Δ agreement
++0.001). This is **NOT a policy-capacity ceiling** (bigger policy net won't
+help) and **not** a pipeline bug. So don't just crank gen-6 on the same
+recipe. Two tracks, run the cheap probe first:
+
+1. **Sharpen the target: sims 128→256.** Testable prediction — teacher
+   peak-visit-mass on correction positions rises. Probe on a *small* corpus
+   (peak sharpens? operator widens?) before spending a full generation.
+2. **Value-head net scaling** (attention over the 36 card rows vs mean pool) —
+   a sharper leaf evaluator makes the search more decisive, lifting both the
+   +11 operator and future target sharpness. Validate on the existing corpus
+   (held-out value MSE + searched-strength yardstick). See jass_plan Step 4.

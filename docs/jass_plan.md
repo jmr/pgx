@@ -7,7 +7,50 @@ This document is the working plan. It is written so that a fresh agent (or a
 human returning after a break) can pick up from any step. Update the **Status**
 markers as work completes; record arena results in the step's **Results** slot.
 
-## Status snapshot (2026-06-21)
+## Status snapshot (2026-07-01)
+
+**gen-5 VERDICT (2026-07-01) — policy expert-iteration has SATURATED at
+sims=128; the loop's policy climb plateaued. NOT a policy-net capacity
+ceiling, NOT a pipeline bug.** Champion stays **gen-4** (gen-5 not promoted).
+The full diagnostic chain (all artifacts ruled out, then the mechanism found):
+
+- **Three flat gates, gen-5 vs gen-4** (τ=0.05 raw unless noted): raw seed 0
+  **+1.5 (t=0.9)**, raw seed 2 **+2.4 (t=1.57)**, **PUCT@16 +0.5 (t=0.21)** —
+  all ns. The low-sims PUCT gate (meant to be *more* sensitive) is the
+  flattest: search can't amplify a policy edge that isn't there. Contrast
+  gen-4-over-gen-3 raw was **+15 (t=8.9)**.
+- **Not an artifact:** fingerprints differ (gen-4 param-sum 871.3 → gen-5
+  908.7, so the net *did* change — mostly the value head); trained to 20k
+  (eval value loss **0.1382** ≈ 0.14); provenance clean (collect used gen-4 @
+  sims=128, train read `corpus_puct_gen4_16x2048_s128k8.pickle`; `GEN=5/SRC=4`
+  anchor makes a gen-3 pickup impossible).
+- **Operator NOT exhausted:** gen-4 PUCT@128 vs gen-4 raw = **+11.1 (t=2.94**,
+  80 pairs**)** — down from gen-3's +26 but still real teaching signal.
+- **Distillation gap (held-out batch, 76 341 alive positions) — the smoking
+  gun:** gen-4 raw AND gen-5 raw both agree with the gen-4-teacher `pi` at
+  **0.634 (Δ=+0.001)** — training on gen-4's targets moved the policy argmax
+  essentially *zero*. On the **36.6%** of positions where the search overrode
+  gen-4 raw, gen-5 **adopted the teacher only 16.5%** and **kept gen-4's old
+  move 73.2%**. And the teacher's visit target is **diffuse exactly there**:
+  peak visit mass **0.367 on corrections** vs **0.531 overall**.
+- **Mechanism:** the teacher's residual +11 edge now lives in *soft* visit
+  distributions (peak ~0.37 on the moves that matter), which carry no argmax
+  training gradient — the student already sits at a CE optimum w.r.t. them.
+  So the *distillable-into-argmax* signal collapsed far faster than the raw
+  operator margin: conversion of operator→raw-gain went **~58% (gen-3→4,
+  +15/+26) → ~0% at the argmax level (gen-4→5, +2/+11)**.
+
+**What this REDIRECTS (supersedes the gen-4 "keep cranking gen-5" step):**
+1. **Do NOT scale the policy net** — Δ agreement +0.001 refutes underfit; a
+   bigger policy head has no gradient to exploit.
+2. **Cheap probe: sharpen the target via sims 128→256.** Testable prediction:
+   peak-visit-mass on correction positions should rise. Validate on a *small*
+   corpus (does peak sharpen? does the operator widen?) before committing a
+   full generation.
+3. **Higher upside: value-head scaling** (attention over the 36 card rows vs
+   mean pool). A better leaf evaluator makes the search itself more decisive —
+   lifting both the +11 operator AND future target sharpness. This is the
+   pre-registered Step-4 pivot, now with evidence it's the right head.
 
 **Where we are:** Steps 0–2 done; **Step 3 (PUCT expert iteration) climbed
 hard for three generations then DECELERATED at gen-4.** Champion is now
@@ -516,7 +559,7 @@ small-K rollout MCTS.
   early Step 3, but PUCT retrains the policy on visit distributions
   regardless.
 
-## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: LOOP ALIVE — gen-4 PUCT@64 gate read +3.5 but the gate went BLIND; gen-4 *raw* policy is +15 over gen-3, operator NOT starved (+26). Champion `pv_gen4_s128.msgpack`. NEXT: gen-5 gated raw-vs-raw + net scaling on the VALUE head. Procedure → docs/jass_sop.md]
+## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: POLICY EXPERT-ITERATION SATURATED at gen-5 (raw gate flat +1.5/+2.4/PUCT@16 +0.5, all ns) — operator still +11 but its residual edge is in DIFFUSE visit targets (peak 0.37 on corrections), so no distillation gradient; NOT a policy-capacity ceiling (Δ agreement +0.001). Champion stays `pv_gen4_s128.msgpack`. NEXT: sharpen targets (sims 128→256) and/or Step-4 VALUE-head scaling — do NOT scale the policy net. Procedure → docs/jass_sop.md]
 
 Implemented 2026-06-12 in `pgx/_src/games/jass_puct.py` (`puct_search`,
 `puct_action`, `make_puct_action_fn`, `make_puct_policy_fn`,
@@ -560,6 +603,24 @@ Strategy fusion / non-locality is an accepted known flaw at this stage.
 rollout baseline at matched wall-clock.
 
 **Results:**
+
+- **2026-07-01, gen-5 — POLICY EXPERT-ITERATION SATURATED (not promoted).**
+  Trained on `corpus_puct_gen4_16x2048_s128k8.pickle` (gen-4 @ sims=128, K=8),
+  2-way 50/50 with step2, 20k epochs, `policy_weight=1.0`, `augment=True`;
+  eval value loss 0.1382. Gates gen-5 vs gen-4 all ns: raw τ=0.05 **+1.5
+  (t=0.9)** seed 0 / **+2.4 (t=1.57)** seed 2; **PUCT@16 +0.5 (t=0.21)** — the
+  supposedly-more-sensitive low-sims gate is *flattest*. Diagnostics (CPU, on
+  existing nets): operator gen-4 PUCT@128 vs gen-4 raw **+11.1 (t=2.94**, 80
+  pairs, seed-looped — see SOP OOM note**)** — NOT exhausted. Held-out
+  distillation gap (76 341 alive positions): gen-4-raw and gen-5-raw both agree
+  with the gen-4-teacher `pi` at **0.634 (Δ=+0.001)**; on the 36.6% of
+  positions the search corrected, gen-5 adopted the teacher only **16.5%**,
+  kept gen-4's move **73.2%**; teacher visit peak **0.367 on corrections** vs
+  **0.531 overall**. → The +11 lives in diffuse targets that carry no argmax
+  gradient; the student is at a CE optimum. **NOT a policy-capacity ceiling**
+  (Δ+0.001 refutes underfit) and **not a pipeline bug** (provenance verified).
+  Next: sharpen targets (sims 128→256, testable: peak-on-corrections rises)
+  and/or Step-4 value-head scaling — do NOT scale the policy net.
 
 - **2026-06-13/14, run 3 extended (same checkpoint, resumed past epoch 600,
   no architecture change) — policy CE still falling, approaching a

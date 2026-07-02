@@ -33,10 +33,10 @@ you **gate**, and keep as champion on a win. So the gate/diagnostic cells load
 
 ## Stage 1 — Collect (TPU 2×4, ~48 min)
 
-Generate the PUCT corpus with the champion as generator. **Only this half is
-regenerated each gen**; the step2 corpus (`corpus_k8_v1_24x4096`, the fixed
-50% anchor) is reused as-is — confirm its extension (`.pkl` vs `.pickle`) on
-Drive before relying on it.
+Generate the PUCT corpus with the champion as generator. Since 2026-07-02
+this is the **entire** training set: **the step2 anchor is RETIRED** (its
+50% share caused the gen-5 plateau — see the experiment log). Keep
+`corpus_k8_v1_24x4096` on Drive; never regenerate it, never train on it.
 
 - `make_puct_policy_fn(pv_model.apply, src_params, num_determinizations=8,`
   `num_simulations=128, temperature=1.0)`, pmap'd over the 8 chips.
@@ -57,19 +57,21 @@ Drive before relying on it.
 Restart to a **1×1** runtime to spend the scarce 2×4 budget only on
 collection (training uses 1 chip regardless; corpus is on Drive). Then:
 
-- Fresh `PolicyValueNet`, `train_pv_model(collect_fn=[puct_fn, step2_fn], …)`
-  — **2-way 50/50**, the locked recipe. 20k epochs, `policy_weight=1.0`,
-  `augment=True`.
+- Fresh `PolicyValueNet`, `train_pv_model(collect_fn=[puct_fn], …)` —
+  **100% newest-PUCT** (recipe changed 2026-07-02: the old 50% step2 anchor
+  absorbed the distillation gradient; gen-5b climbed +12/+16 without it).
+  20k epochs, `policy_weight=1.0`, `augment=True`.
 - Corpus on **host** (numpy, never `jnp.asarray` the whole thing).
-  `make_cached_collect_fn`: `split=1` for the 2048-game PUCT batches,
-  `split=2` for the 4096-game step2 batches → ~2048 games/step. Hold out the
-  last PUCT batch for eval.
+  `make_cached_collect_fn`: `split=1` for the 2048-game PUCT batches →
+  ~2048 games/step (the retired step2 corpus needed `split=2` for its
+  4096-game batches). Hold out the last PUCT batch for eval.
 - `checkpoint_path=…f"pv_gen{GEN}_s128_ckpt.msgpack"` (NEW path — a
   pre-existing file makes it resume and finish in seconds), `checkpoint_every=500`.
   Resume = rerun the same call (RNG fast-forwarded).
 - **Confirm it actually reached 20k** (the `training done` print / final eval
   at epoch 20000) before gating — don't read stale scrollback.
-- **Training-health check:** eval **value loss ≈ 0.14** at the end. Do NOT
+- **Training-health check:** eval **value loss ≈ 0.13–0.14** at the end
+  (gen-5b: 0.1332). Do NOT
   gate on value loss (a wash every gen) or raw policy CE (floored at the soft
   target's entropy) — diagnose policy by top-1 agreement.
 
@@ -116,32 +118,29 @@ pool: `np.concatenate([policy_match(a, b, PRNGKey(s), 80) for s in range(3)])`
   raw. Large + while PUCT-vs-PUCT is flat = the search is masking real policy
   gains (this is now the standing gate, above).
 
-## Current strategic state (2026-07-01)
+## Current strategic state (2026-07-02)
 
-**Policy expert-iteration SATURATED at gen-5** (raw gate flat; see jass_plan
-gen-5 VERDICT). The operator is still +11 but its residual edge sits in
-*diffuse* visit targets (peak 0.37 on the corrected positions), so it carries
-no argmax distillation gradient — the student is at a CE optimum (Δ agreement
-+0.001). This is **NOT a policy-capacity ceiling** (bigger policy net won't
-help) and **not** a pipeline bug. So don't just crank gen-6 on the same
-recipe. Three tracks, cheapest first:
+**The loop is RE-OPENED — the gen-5 flat gates were the 50% step2 anchor,
+not saturation.** The mix ablation's dose-response (all on the same gen-4
+corpus): adoption of teacher corrections rises as the anchor shrinks
+(16.5% → 24.7% → 33.5% at 50/20/0%), and the 0% retrain climbed
+**+11.8/+16.2 raw vs gen-4** → **gen-5b (`pv_gen5b_s128.msgpack`),
+champion-designate**. The recipe above is already updated (100%
+newest-PUCT). In order:
 
-1. **Step2-mix ablation, 0% and 20% (pre-registered 2026-07-02)** — *20%
-   arm DONE (gate flat; adoption up but drift cancels — target SNR is the
-   binding constraint; see the experiment log), 0% pending.* Zero
-   collection, retrain on the existing gen-4 corpus (~1 h/variant): 20% =
-   `collect_fn=[puct_fn]*4 + [step2_fn]` (epoch round-robin sets the
-   ratio), 0% = `[puct_fn]`; distinct checkpoint paths
-   (`pv_gen5_mix80_ckpt` / `pv_gen5_mix100_ckpt`). Gate raw-vs-raw vs
-   gen-4; mechanism readout = teacher-adoption rate on correction positions
-   (rises from 16.5% if the 50% one-hot gen-0-era anchor was the drag);
-   watch eval value loss + PUCT@64 on the 0% run (value-head coverage is
-   the risk). Full pre-registration in the jass_plan Status snapshot.
-2. **Sharpen the target: sims 128→256** (and consider K 8→16 — cross-det
-   averaging noise; B×K≈512 → B=32/chip). Testable prediction — teacher
-   peak-visit-mass on correction positions rises. Probe on a *small* corpus
-   (peak sharpens? operator widens?) before spending a full generation.
-3. **Value-head net scaling** (attention over the 36 card rows vs mean pool) —
-   a sharper leaf evaluator makes the search more decisive, lifting both the
-   +11 operator and future target sharpness. Validate on the existing corpus
-   (held-out value MSE + searched-strength yardstick). See jass_plan Step 4.
+1. **PUCT@64 deployed check, gen-5b vs gen-4** (greedy K=8/sims=64, the
+   historical gate config). This is the one risk the raw gate can't see:
+   gen-5b's value head trained on champion-self-play positions only, and
+   it is the search leaf. Expect compression (gen-4's +15 raw read +3.5
+   here); pass = positive-or-flat. Clears gen-5b as champion and as the
+   gen-6 generator — run before spending 2×4 budget on collection.
+2. **gen-6 on the new recipe** (gen-5b generator, sims=128/K=8, 100% PUCT,
+   raw-vs-raw gate, two seeds). Re-measure the operator while the corpus
+   collects (gen-5b PUCT@128 vs gen-5b raw, seed-looped ≤80 pairs): +26 at
+   gen-3 → +11 at gen-4 → ? — the fuel gauge for how long the crank runs.
+3. **JTR re-calibration at gen-5b** (owed since gen-4) — the
+   self-relative→absolute conversion rate vs gen-3's −22/game.
+
+Queued: target sharpening (sims 256 / K 16) and Step-4 value-head scaling —
+revisit at the next deceleration; with the anchor gone, a flat raw gate
+will then mean saturation for real.

@@ -682,3 +682,48 @@ gen-5's 0.1382 — no value-head-coverage degradation at 20%).
   carry signal, a flat result at high retention would confirm they are
   noise and only sharpening can help. (Needs an `init_params=` path in
   `train_pv_model`.)
+
+## 2026-07-02 — step2-mix ablation, 0% arm — CLIMBED +11.8/+16.2; the ANCHOR WAS THE PLATEAU
+
+Second arm of the pre-registered probe: same gen-4 corpus, **100% PUCT
+epochs** (`collect_fn=[puct_fn]`, no step2 at all), otherwise the locked
+recipe. Eval value loss **0.1332** — the best of the three arms (50/50
+0.1382, 20% 0.1358, 0% 0.1332): no value-coverage degradation visible on
+the PUCT-batch holdout.
+
+- **Gate — mix100 raw vs gen-4 raw** (τ=0.05, `policy_match`, 300
+  pairs/seed): **seed 0 +11.8 (t=6.67), seed 2 +16.2 (t=8.0)** — both p≈0,
+  a gen-4-sized climb (gen-4 over gen-3 raw was +15) from a net trained on
+  the SAME corpus whose 50/50 mix gated flat (+1.5/+2.4). **Two-seed
+  promotion criterion MET → gen-5b.** Save the final mix100 net as
+  `pv_gen5b_s128.msgpack` (gen-2b naming precedent; do NOT overwrite the
+  50/50 `pv_gen5_s128.msgpack`).
+- **Distillation-gap readout** (same held-out batch; gen-4 agreement 0.634
+  and peaks 0.367/0.531 reproduce): mix100 agrees with the teacher at
+  **0.66** (up from gen-5's 0.634); on corrections **adopted 33.5%**
+  (16.5% → 24.7% → 33.5% across 50/20/0%), **kept gen-4's move 52.3%**
+  (73.2 → 58.8 → 52.3). Non-correction agreement ~84.8% — the same plateau
+  as the 20% arm's ~83.7%.
+- **The dose-response resolves the mechanism — and CORRECTS the 20%-arm
+  entry above.** Adoption rises steadily as the anchor shrinks while the
+  drift off agreed moves is a roughly FIXED cost (~15–16% at both 20% and
+  0%): at 50% the anchor absorbed the gradient entirely, at 20% adoption
+  gains ≈ drift cost (the flat gate was the unlucky middle of the curve),
+  at 0% adoption doubles again and wins outright. "Target SNR is the
+  binding constraint" (20%-arm entry) was WRONG: **the diffuse sims=128
+  corrections carry real, convertible signal — the anchor was both
+  suppressing adoption and eating the conversion.**
+- **The 2026-07-01 gen-5 VERDICT ("policy expert-iteration saturated") is
+  OVERTURNED.** No saturation, no target-sharpness wall (yet) — a recipe
+  bug of the same family as the gen-2 3-way regression, one notch subtler:
+  stale sharp targets don't just drag a from-scratch net toward old
+  behavior, at 50% they null out a subtle fresh signal completely.
+  **Standing recipe → 100% newest-PUCT** (plan + SOP updated). Lesson:
+  ablate the mix before declaring saturation — the anchor was the only
+  never-ablated recipe component.
+- **Open before the champion/generator switch: the PUCT@64 deployed check
+  vs gen-4** (gen-5b's value head trained on champion-self-play positions
+  only, and it is the search leaf; the holdout and the raw gate can't see
+  off-distribution value error, the searched arena can). Then: gen-6 on
+  the new recipe, operator re-measure (gen-5b PUCT@128 vs raw), JTR
+  re-calibration (owed since gen-4).

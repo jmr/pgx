@@ -449,7 +449,7 @@ Levers, **REORDERED by the measurement** (batch-fix first, then chips):
    subtree reuse (re-determinize every move, nothing to carry); any
    data-parallel trick (collection is *already* the parallel stage).
 
-## Step 4 — Scale and benchmark externally  [Status: IN PROGRESS — external benchmark DONE (gen-3 exported to JTR, calibrated 2026-06-20: weak in absolute terms, the MODEL is the limiter). Net scaling: TODO]
+## Step 4 — Scale and benchmark externally  [Status: IN PROGRESS — external benchmark DONE (gen-3 calibrated 2026-06-20, gen-5b re-calibrated 2026-07-02: gap to POWERFUL roughly HALVED, −22/game → ≈−9.5/game). Net scaling: TODO]
 
 - Net scaling: attention over the 36 card rows is the natural upgrade from
   mean pooling; then width/depth, more simulations, larger batches.
@@ -471,6 +471,15 @@ POWERFUL's own search), ≈ level with FAST_TEST, the weakest MCTS baseline.
 **The model is the limiter, not the integration or search depth** — the
 lever is stronger pgx models (per the 2026-06-20 DECISION, in the log).
 Not yet competitive.
+
+**Re-calibration (2026-07-02; full entry in the experiment log):** gen-4 and
+gen-5b exported and re-run through the same JTR real-PUCT harness. gen-5b >
+gen-4 reproduces externally (+8.35/game, p=0.0000), and **the gap to
+POWERFUL has roughly HALVED since gen-3: −22/game → ≈−9.5/game** (250
+paired games, p=0.0000). The self-relative policy gains since gen-3 convert
+substantially into absolute strength — still not competitive with POWERFUL,
+but closing. gen-4's own POWERFUL calibration was skipped (deferred
+straight to gen-5b), so this is only a two-point trendline.
 
 ## Step 5 (optional, research-grade) — imperfect-information refinements  [Status: TODO]
 

@@ -744,3 +744,37 @@ gen-4, +2.2 ns here) while the raw policy gained ~+27–31 — the value head
 remains the deployed-strength cap. Step-4 value-head scaling stays queued;
 the JTR re-calibration will quantify how much raw-policy gain converts to
 absolute strength.
+
+## 2026-07-02 — JTR re-calibration at gen-5b (owed since gen-4): gap to POWERFUL roughly HALVED
+
+gen-4 and gen-5b exported (`scripts/extract_pv_weights.py` →
+`scripts/export_pv_savedmodel.py`) into JTR's
+`src/main/resources/models/{pv_gen4_s128,pv_gen5b_s128}/export` and run
+through JTR's real-PUCT integration (swapped-deal paired t-test).
+
+- **gen-5b vs gen-4, real PUCT** (SWEEP_64 = 64 runs/det, both sides,
+  500 pairs / 1000 games, seed 42): **+16.7/pair (+8.35/game), t=7.53,
+  p=0.0000, sign 297W-174L-29T** — external confirmation of the internal
+  climb (gen-5b was +11.8/+16.2 raw vs gen-4 in pgx itself, see the 0% arm
+  entry above). Same pattern as the gen-3>gen-2 result: real PUCT surfaces
+  a generation gain that the old argmax-tip + Q-sum setup would have washed.
+- **gen-5b vs POWERFUL (classical), 250 pairs across 2 seeds:** seed 42
+  (50 pairs) −12.6/pair (−6.3/game, t=−1.74, p=0.089 ns); seed 43
+  (200 pairs) **−20.7/pair (−10.35/game, t=−5.6, p=0.0000)**; pair-weighted
+  combined ≈ **−19.1/pair (≈−9.5/game)**.
+- **Absolute-strength gap to POWERFUL has roughly HALVED since gen-3**
+  (−22/game → ≈−9.5/game), while remaining a clear, significant loss. This
+  answers the open question from the 2026-06-20 DECISION: the self-relative
+  policy gains since gen-3 (gen-3→gen-4 raw +15, gen-4→gen-5b raw +27–31 via
+  the step2-mix-ablation fix) DO convert substantially into absolute
+  strength — not just self-play-relative noise that dies against a
+  classical opponent, as gen-3's own weak showing against POWERFUL had left
+  open.
+- **gen-4's own POWERFUL calibration was never run** (deferred straight to
+  gen-5b per the 2026-06-21 gen-4 REFRAME) — the −22 → −9.5 trendline has
+  only two points (gen-3, gen-5b), not a full per-generation curve.
+- Runtime note: the gen-5b-vs-gen-4 self-play arena (both sides doing pgx NN
+  inference at every node) ran ~4 s/game (1000 games ≈ 72 min wall-clock);
+  the POWERFUL-calibration runs were ~3× faster per game (~1.2 s/game) since
+  classical random rollouts are cheaper per node than repeated NN forward
+  passes on both sides.

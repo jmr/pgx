@@ -124,12 +124,22 @@ gen-5 VERDICT). The operator is still +11 but its residual edge sits in
 no argmax distillation gradient — the student is at a CE optimum (Δ agreement
 +0.001). This is **NOT a policy-capacity ceiling** (bigger policy net won't
 help) and **not** a pipeline bug. So don't just crank gen-6 on the same
-recipe. Two tracks, run the cheap probe first:
+recipe. Three tracks, cheapest first:
 
-1. **Sharpen the target: sims 128→256.** Testable prediction — teacher
+1. **Step2-mix ablation, 0% and 20% (pre-registered 2026-07-02)** — zero
+   collection, retrain on the existing gen-4 corpus (~1 h/variant): 20% =
+   `collect_fn=[puct_fn]*4 + [step2_fn]` (epoch round-robin sets the
+   ratio), 0% = `[puct_fn]`; distinct checkpoint paths
+   (`pv_gen5_mix80_ckpt` / `pv_gen5_mix100_ckpt`). Gate raw-vs-raw vs
+   gen-4; mechanism readout = teacher-adoption rate on correction positions
+   (rises from 16.5% if the 50% one-hot gen-0-era anchor was the drag);
+   watch eval value loss + PUCT@64 on the 0% run (value-head coverage is
+   the risk). Full pre-registration in the jass_plan Status snapshot.
+2. **Sharpen the target: sims 128→256** (and consider K 8→16 — cross-det
+   averaging noise; B×K≈512 → B=32/chip). Testable prediction — teacher
    peak-visit-mass on correction positions rises. Probe on a *small* corpus
    (peak sharpens? operator widens?) before spending a full generation.
-2. **Value-head net scaling** (attention over the 36 card rows vs mean pool) —
+3. **Value-head net scaling** (attention over the 36 card rows vs mean pool) —
    a sharper leaf evaluator makes the search more decisive, lifting both the
    +11 operator and future target sharpness. Validate on the existing corpus
    (held-out value MSE + searched-strength yardstick). See jass_plan Step 4.

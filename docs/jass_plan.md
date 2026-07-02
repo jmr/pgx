@@ -42,16 +42,50 @@ collapsed far faster than the operator margin: conversion ~58% (gen-3→4)
 locked recipe, and do NOT scale the policy net — Δ agreement +0.001 refutes
 underfit):**
 
-1. **Cheap probe: sharpen the target via sims 128→256.** Testable
+1. **PRE-REGISTERED PROBE (2026-07-02): step2-mix ablation, 0% and 20% —
+   run this FIRST (zero collection, ~1 h/variant on the existing gen-4
+   corpus).** The 50% step2 anchor is the one never-ablated recipe
+   component and is now suspect: it is sharp one-hot targets from a
+   gen-0-era teacher (K=8 V₁-leaf search), kept for value-head coverage and
+   recipe inertia. That was harmless while the fresh corpus carried a
+   +26-operator signal; now the fresh half's marginal signal is subtle and
+   diffuse while the anchor's is sharp and stale — the same failure shape as
+   the gen-2 3-way regression, just slower. It plausibly explains why gen-5
+   is NOT at the distributional optimum on corrections (it keeps gen-4's
+   move 73.2% even where the teacher's argmax holds the plurality mass).
+   Recipe: 20% = `collect_fn=[puct_fn]*4 + [step2_fn]` (epoch round-robin
+   sets the ratio), 0% = `[puct_fn]`; distinct checkpoint paths
+   (`pv_gen5_mix80_ckpt.msgpack` / `pv_gen5_mix100_ckpt.msgpack`); eval
+   holdout stays the held-out PUCT batch. Readouts, in order: (a)
+   raw-vs-raw vs gen-4 (τ=0.05, two seeds) — the gate; (b) teacher-adoption
+   rate on correction positions — rises from 16.5% if the anchor was the
+   drag; (c) eval value loss (~0.14 baseline) + the PUCT@64 deployed check —
+   the 0% risk is value-head coverage (champion-self-play-only data; at 0%
+   there is no one-hot data left, so diagnose policy by top-1 agreement
+   only). Interpretation: both flat → anchor exonerated, blocker is target
+   noise (item 2) or from-scratch training (warm-start from gen-4 — needs an
+   `init_params` path in `train_pv_model` — is the next zero-collection
+   probe; post-hoc target sharpening `pi ∝ pi^β` on the existing corpus is a
+   free softness-vs-noise separator); climbs with value holding → the recipe
+   change is nearly free.
+2. **Cheap probe: sharpen the target via sims 128→256.** Testable
    prediction: peak-visit-mass on correction positions should rise. Validate
    on a *small* corpus (does the peak sharpen? does the operator widen?)
-   before committing a full generation.
-2. **Higher upside: value-head scaling** (attention over the 36 card rows vs
+   before committing a full generation. Consider **K 8→16 alongside**: the
+   diffuseness on corrections may be *cross*-determinization averaging
+   noise, which more sims per det cannot fix (B×K≈512 VMEM rule → B=32/chip
+   at K=16).
+3. **Higher upside: value-head scaling** (attention over the 36 card rows vs
    mean pool). A better leaf evaluator makes the search itself more
    decisive — lifting both the +11 operator AND future target sharpness.
    This is the pre-registered Step-4 pivot, now with evidence it's the right
    head. Validate on the *existing* corpus (held-out value MSE + the
    searched-strength yardstick).
+4. **The gen-4 JTR calibration is still owed** (pre-registered in the gen-4
+   recipe, never run; last external number is gen-3's −22/game vs
+   POWERFUL). gen-4 raw is +15 over gen-3, so this one measurement gives
+   the self-relative→absolute conversion rate — the number that decides how
+   much more the loop is worth vs going all-in on the value head.
 
 **Operational facts:** TPU quota constraints are gone, but the active
 Colab TPU has only **~12.2 G usable** (not 16 G). V-vs-V arenas: 1000
@@ -293,7 +327,7 @@ rollout-baseline yardstick moved for the first time since Step 0:
 extension = gen-0; policy-only reached +33, matching the teacher). That is
 the number generation 1 had to beat. **STEP 2 CLOSED 2026-06-13.**
 
-## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: POLICY EXPERT-ITERATION SATURATED at gen-5 (raw gate flat +1.5/+2.4/PUCT@16 +0.5, all ns) — operator still +11 but its residual edge is in DIFFUSE visit targets (peak 0.37 on corrections), so no distillation gradient; NOT a policy-capacity ceiling (Δ agreement +0.001). Champion stays `pv_gen4_s128.msgpack`. NEXT: sharpen targets (sims 128→256) and/or Step-4 VALUE-head scaling — do NOT scale the policy net. Procedure → docs/jass_sop.md]
+## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: POLICY EXPERT-ITERATION SATURATED at gen-5 (raw gate flat +1.5/+2.4/PUCT@16 +0.5, all ns) — operator still +11 but its residual edge is in DIFFUSE visit targets (peak 0.37 on corrections), so no distillation gradient; NOT a policy-capacity ceiling (Δ agreement +0.001). Champion stays `pv_gen4_s128.msgpack`. NEXT: step2-mix ablation 0%/20% (pre-registered 2026-07-02, zero collection), then sharpen targets (sims 128→256, K 8→16) and/or Step-4 VALUE-head scaling — do NOT scale the policy net. Procedure → docs/jass_sop.md]
 
 Implemented 2026-06-12 in `pgx/_src/games/jass_puct.py` (`puct_search`,
 `puct_action`, `make_puct_action_fn`, `make_puct_policy_fn`,

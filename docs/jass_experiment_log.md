@@ -637,3 +637,48 @@ diagnostic chain (all artifacts ruled out, then the mechanism found):
    mean pool). A better leaf evaluator makes the search itself more decisive —
    lifting both the +11 operator AND future target sharpness. This is the
    pre-registered Step-4 pivot, now with evidence it's the right head.
+
+## 2026-07-02 — step2-mix ablation, 20% arm — GATE FLAT; adoption UP but drift cancels it
+
+First arm of the pre-registered probe (plan Status snapshot, 2026-07-02):
+retrain gen-5 on the existing gen-4 corpus with the step2 anchor cut
+50%→20% (`collect_fn=[puct_fn]*4 + [step2_fn]`, epoch round-robin; 20k
+epochs, fresh net, otherwise the locked recipe). Training healthy: eval
+value loss **0.1358** (≈ the 0.14 band; slightly *better* than the 50/50
+gen-5's 0.1382 — no value-head-coverage degradation at 20%).
+
+- **Gate — mix80 raw vs gen-4 raw** (τ=0.05, `policy_match`, 300
+  pairs/seed): **seed 0 +1.0 (t=0.58), seed 2 +1.4 (t=0.80) — both ns**,
+  numerically the same as the 50/50 gen-5 gates (+1.5/+2.4). Raising the
+  PUCT share of gradient steps 50%→80% bought zero strength.
+- **Distillation-gap readout (same held-out batch as the gen-5
+  diagnostic; gen-4 agreement 0.634 and peaks 0.367/0.531 reproduce):**
+  mix80 agrees with the gen-4 teacher at **0.621** (DOWN from gen-5's
+  0.634); on corrections it **adopted the teacher 24.7%** (up from 16.5%)
+  and **kept gen-4's move 58.8%** (down from 73.2%; a *third* move 16.5%,
+  up from 10.3%).
+- **The accounting (corrections = 36.6% of positions; non-corrections =
+  63.4%, where gen-4 already matches the teacher):** on the agreed
+  positions mix80 matches only **~83.7%** vs gen-5's ~90.5%. In totals it
+  gained ~3.0% of positions as adopted corrections and lost ~4.3% off
+  agreed-good moves → net agreement −1.3%, net strength ~0. The freed
+  policy moved *symmetrically* — toward the teacher where the target is
+  diffuse, away from it where it was already right.
+- **MECHANISM REVISION (sharpens the gen-5 verdict):** the diffuse targets
+  do carry an argmax gradient — the 50% anchor was absorbing it (adoption
+  rose the moment it was cut), and its real function was *stabilizing the
+  agreed moves*. The binding constraint is **target signal-to-noise**: at
+  peak mass 0.37 the per-position margin is too weak for movement to
+  convert into strength. So "student at a CE optimum / no gradient" →
+  "gradient exists, but at current target sharpness it moves the policy
+  without strengthening it."
+- **Consequences:** (1) target **sharpening (sims 128→256 and/or K 8→16)
+  is now the front-runner** — it directly raises the per-position margin;
+  (2) the **0% arm** (pending) becomes the third point on the anchor
+  dose-response curve (prediction: adoption up further, agreement down
+  further, gate flat-to-negative); (3) **warm-start from gen-4** is the
+  discriminating follow-up — initialization-as-anchor should retain agreed
+  moves while accumulating corrections; a gain would prove the corrections
+  carry signal, a flat result at high retention would confirm they are
+  noise and only sharpening can help. (Needs an `init_params=` path in
+  `train_pv_model`.)

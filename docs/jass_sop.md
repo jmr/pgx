@@ -126,7 +126,9 @@ no argmax distillation gradient — the student is at a CE optimum (Δ agreement
 help) and **not** a pipeline bug. So don't just crank gen-6 on the same
 recipe. Three tracks, cheapest first:
 
-1. **Step2-mix ablation, 0% and 20% (pre-registered 2026-07-02)** — zero
+1. **Step2-mix ablation, 0% and 20% (pre-registered 2026-07-02)** — *20%
+   arm DONE (gate flat; adoption up but drift cancels — target SNR is the
+   binding constraint; see the experiment log), 0% pending.* Zero
    collection, retrain on the existing gen-4 corpus (~1 h/variant): 20% =
    `collect_fn=[puct_fn]*4 + [step2_fn]` (epoch round-robin sets the
    ratio), 0% = `[puct_fn]`; distinct checkpoint paths

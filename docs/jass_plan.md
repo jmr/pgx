@@ -44,7 +44,11 @@ underfit):**
 
 1. **PRE-REGISTERED PROBE (2026-07-02): step2-mix ablation, 0% and 20% —
    run this FIRST (zero collection, ~1 h/variant on the existing gen-4
-   corpus).** The 50% step2 anchor is the one never-ablated recipe
+   corpus).** *[20% arm DONE 2026-07-02 — gate flat (+1.0/+1.4 ns) but
+   adoption rose 16.5→24.7% while drifting off agreed moves: the anchor was
+   absorbing the gradient, and the binding constraint is target SNR →
+   sharpening (item 2) is now the front-runner; 0% arm pending. Full entry
+   in the experiment log.]* The 50% step2 anchor is the one never-ablated recipe
    component and is now suspect: it is sharp one-hot targets from a
    gen-0-era teacher (K=8 V₁-leaf search), kept for value-head coverage and
    recipe inertia. That was harmless while the fresh corpus carried a

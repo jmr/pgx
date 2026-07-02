@@ -727,3 +727,20 @@ the PUCT-batch holdout.
   off-distribution value error, the searched arena can). Then: gen-6 on
   the new recipe, operator re-measure (gen-5b PUCT@128 vs raw), JTR
   re-calibration (owed since gen-4).
+
+## 2026-07-02 — gen-5b PUCT@64 deployed check PASSED — PROMOTED (CHAMPION)
+
+gen-5b PUCT@64 vs gen-4 PUCT@64 (greedy K=8/sims=64, `policy_match`, 600
+games / 300 swapped-deal pairs, seed 0): **+2.2/game, win 50.3%, t=+1.076
+(p=0.28, ns), sign 148W/145L (ns).** Positive-and-flat = the pre-registered
+pass: this is normal PUCT@64 compression (gen-4's +15 raw read as +3.5 at
+this gate, its seed 0 just +2.6 ns — +2.2 is the same band), and **no sign
+of the value-coverage risk** (a damaged leaf evaluator would read clearly
+negative). Combined with the two-seed raw gate (+11.8/+16.2) → **gen-5b
+PROMOTED: champion and gen-6 generator (`pv_gen5b_s128.msgpack`).**
+
+Strategic note: the *searched* agent has barely moved since gen-3 (+3.5 at
+gen-4, +2.2 ns here) while the raw policy gained ~+27–31 — the value head
+remains the deployed-strength cap. Step-4 value-head scaling stays queued;
+the JTR re-calibration will quantify how much raw-policy gain converts to
+absolute strength.

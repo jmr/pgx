@@ -15,16 +15,15 @@ conclusions and pointers). The per-generation procedure is `docs/jass_sop.md`.
 anchor was the plateau.** The pre-registered mix ablation (retrains on the
 *same* gen-4 corpus, zero collection) resolved it: the 0% arm (100% PUCT
 epochs) took the raw gate from flat to **+11.8 (t=6.67) seed 0 / +16.2
-(t=8.0) seed 2 vs gen-4** — a gen-4-sized climb. **Two-seed promotion
-criterion MET → gen-5b (`pv_gen5b_s128.msgpack`) is champion-designate.**
-One box open before it takes the champion/generator role: the **PUCT@64
-deployed check vs gen-4** — the new recipe trains the value head on
-champion-self-play positions only; eval value loss actually improved
-(0.1382 → 0.1358 → 0.1332 across 50/20/0%), but the PUCT-batch holdout
-cannot see off-distribution value error; the searched arena can. The
-2026-07-01 gen-5 VERDICT ("policy expert-iteration saturated") is
-**OVERTURNED** (entries + the interpretation correction in the experiment
-log).
+(t=8.0) seed 2 vs gen-4** — a gen-4-sized climb. **PROMOTED: gen-5b
+(`pv_gen5b_s128.msgpack`) is CHAMPION and the gen-6 generator.** Both
+boxes cleared: two-seed raw gate p≈0, and the **PUCT@64 deployed check
+passed** (+2.2, t=1.08, ns positive — normal compression, same band as
+gen-4's +3.5; no value-coverage damage from training the value head on
+champion-self-play only, and eval value loss even improved, 0.1382 →
+0.1358 → 0.1332 across 50/20/0%). The 2026-07-01 gen-5 VERDICT ("policy
+expert-iteration saturated") is **OVERTURNED** (entries + the
+interpretation correction in the experiment log).
 
 **Mechanism (anchor dose-response, all three nets trained on the same
 gen-4 corpus; full entries in the log):** as the anchor shrinks
@@ -45,35 +44,32 @@ The ladder (each vs the prior champion): gen-1 **+4.7** (PUCT@64) →
 gen-2(s128) **+11.8–13.1** → gen-3 **+13.9** → gen-4 **+2.6/+4.4** PUCT@64
 but **+15 raw** (the PUCT@64 gate had gone blind to policy gains; the
 progress gate is **raw-vs-raw** since 2026-06-21) → gen-5 (50/50) **flat,
-not promoted** → **gen-5b (0% anchor, same corpus) +11.8/+16.2 raw**.
+not promoted** → **gen-5b (0% anchor, same corpus) +11.8/+16.2 raw**
+(PUCT@64 +2.2 ns — deployed check passed).
 Value loss is irrelevant every time (the climbs are all priors). Step 4's
 external benchmark: gen-3 calibrated vs JassTheRipper 2026-06-20 — weak in
 absolute terms, **the model is the limiter**; net scaling TODO (queued).
 
 **NEXT STEPS:**
 
-1. **PUCT@64 deployed check: gen-5b vs gen-4** (CPU, `make_puct_action_fn`
-   greedy K=8/sims=64 — the historical gate config; raw-vs-raw is already
-   done). Clears gen-5b as champion AND as the gen-6 generator: PUCT with
-   gen-5b's value head at the leaf is exactly the corpus-generation
-   config, so run it before spending 2×4 budget on collection. Expect
-   compression, not +12–16 (gen-4's +15 raw read as +3.5 here): pass =
-   positive-or-flat, fail = clearly negative (⇒ value-coverage damage;
-   fall back to the 20% mix for value data only).
-2. **gen-6 on the new recipe:** collect with gen-5b @ sims=128/K=8, train
-   100% PUCT, gate raw-vs-raw (two seeds). Re-measure the operator while
-   the corpus collects (gen-5b PUCT@128 vs gen-5b raw, seed-looped ≤80
-   pairs) — the fuel gauge read +26 at gen-3, +11 at gen-4; its trajectory
-   decides how long the crank runs.
-3. **JTR re-calibration (owed since gen-4):** export gen-5b, run vs
+1. **gen-6 on the new recipe:** collect with gen-5b @ sims=128/K=8 (2×4,
+   64 games/chip), train 100% PUCT, gate raw-vs-raw (two seeds).
+   Re-measure the operator while the corpus collects (gen-5b PUCT@128 vs
+   gen-5b raw, seed-looped ≤80 pairs) — the fuel gauge read +26 at gen-3,
+   +11 at gen-4; its trajectory decides how long the crank runs.
+2. **JTR re-calibration (owed since gen-4):** export gen-5b, run vs
    POWERFUL. The ladder has added ~+27–31 raw points since gen-3 (gen-4
    +15, gen-5b +12–16) against gen-3's −22/game baseline — this measures
-   the self-relative→absolute conversion rate.
-4. **Queued, no longer front-runners:** target sharpening (sims 128→256,
-   K 8→16) and Step-4 value-head scaling — revisit at the next
-   deceleration; with the anchor gone, a flat raw gate will then mean
-   saturation for real. (Warm-start / target-sharpening probes from the
-   ablation write-up are likewise shelved unless the crank stalls.)
+   the self-relative→absolute conversion rate. NOTE the *searched* agent
+   has moved little since gen-3 (+3.5 at gen-4, +2.2 ns at gen-5b,
+   PUCT@64), so expect the VALUE head to cap the conversion — this
+   measurement decides when item 3 fires.
+3. **Queued:** Step-4 value-head scaling (attention over the 36 card
+   rows — the deployed-strength cap) and target sharpening (sims 128→256,
+   K 8→16) — revisit at the next raw-gate deceleration; with the anchor
+   gone, a flat raw gate will then mean saturation for real. (Warm-start /
+   target-sharpening probes from the ablation write-up are likewise
+   shelved unless the crank stalls.)
 
 **Operational facts:** TPU quota constraints are gone, but the active
 Colab TPU has only **~12.2 G usable** (not 16 G). V-vs-V arenas: 1000
@@ -96,10 +92,10 @@ eval batch also runs a full grad step, so it must be small too.
 `v1.msgpack` (canonical ValueNet line, legacy/rank-blind), `pv3_ckpt.msgpack*`
 slots + `pv_gen0.msgpack` (Step 2 PolicyValueNet, run 3 @ 20k = gen-0),
 `pv_gen1.msgpack`, `pv_gen2_s128.msgpack`, `pv_gen3_s128.msgpack`,
-**`pv_gen4_s128.msgpack` (CHAMPION until gen-5b's deployed check clears)**,
+`pv_gen4_s128.msgpack`,
 `pv_gen5_s128.msgpack` (50/50 — trained, NOT promoted; keep),
-**`pv_gen5b_s128.msgpack` (0% anchor, champion-designate — save the final
-mix100 net under this name; do NOT overwrite `pv_gen5_s128.msgpack`)**.
+**`pv_gen5b_s128.msgpack` (0% anchor — CHAMPION; the final mix100 net; do
+NOT overwrite `pv_gen5_s128.msgpack`)**.
 Corpora: `corpus_k8_v1_24x4096.pkl` (Step 2 — RETIRED from training
 2026-07-02, keep on Drive), `corpus_puct_gen0_8x4096_s16k8.pickle` (gen-1's
 sims=16 corpus),
@@ -319,7 +315,7 @@ rollout-baseline yardstick moved for the first time since Step 0:
 extension = gen-0; policy-only reached +33, matching the teacher). That is
 the number generation 1 had to beat. **STEP 2 CLOSED 2026-06-13.**
 
-## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: LOOP RE-OPENED 2026-07-02 — the gen-5 flat gates were the 50% step2 anchor, not saturation: gen-5b (100% PUCT epochs on the same gen-4 corpus) climbs **+11.8/+16.2 raw** vs gen-4; two-seed promotion criterion MET, PUCT@64 deployed check pending. Standing recipe: **100% newest-PUCT**, sims=128, K=8. NEXT: deployed check → gen-6 crank. Procedure → docs/jass_sop.md]
+## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: LOOP RE-OPENED 2026-07-02 — the gen-5 flat gates were the 50% step2 anchor, not saturation: gen-5b (100% PUCT epochs on the same gen-4 corpus) climbs **+11.8/+16.2 raw** vs gen-4 and passed the PUCT@64 deployed check (+2.2 ns). **CHAMPION: `pv_gen5b_s128.msgpack`.** Standing recipe: **100% newest-PUCT**, sims=128, K=8. NEXT: gen-6 crank + operator re-measure; JTR re-calibration. Procedure → docs/jass_sop.md]
 
 Implemented 2026-06-12 in `pgx/_src/games/jass_puct.py` (`puct_search`,
 `puct_action`, `make_puct_action_fn`, `make_puct_policy_fn`,
@@ -374,7 +370,7 @@ operational war stories in `docs/jass_experiment_log.md`):**
 | gen-3 (s128) | PUCT@64 **+13.9** (t=9.5) | PROMOTED — loop self-sustaining |
 | gen-4 (s128) | PUCT@64 +2.6/+4.4; **raw +15.0** | PROMOTED — PUCT@64 gate went blind; progress gate → raw-vs-raw |
 | gen-5 (s128, 50/50) | raw **+1.5 / +2.4 ns**; PUCT@16 +0.5 | NOT promoted — the flat gate was the step2 anchor (see gen-5b) |
-| gen-5b (s128, **0% step2**, same gen-4 corpus) | raw **+11.8 / +16.2** (t=6.7/8.0) | promotion criterion MET — anchor was the plateau; PUCT@64 deployed check pending |
+| gen-5b (s128, **0% step2**, same gen-4 corpus) | raw **+11.8 / +16.2** (t=6.7/8.0); PUCT@64 +2.2 ns | PROMOTED — anchor was the plateau; deployed check passed |
 
 Mechanism lessons pinned along the way (details in the log):
 

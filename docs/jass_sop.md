@@ -124,23 +124,20 @@ pool: `np.concatenate([policy_match(a, b, PRNGKey(s), 80) for s in range(3)])`
 not saturation.** The mix ablation's dose-response (all on the same gen-4
 corpus): adoption of teacher corrections rises as the anchor shrinks
 (16.5% → 24.7% → 33.5% at 50/20/0%), and the 0% retrain climbed
-**+11.8/+16.2 raw vs gen-4** → **gen-5b (`pv_gen5b_s128.msgpack`),
-champion-designate**. The recipe above is already updated (100%
-newest-PUCT). In order:
+**+11.8/+16.2 raw vs gen-4**, then **passed the PUCT@64 deployed check**
+(+2.2 ns — normal compression, gen-4's +15 raw read +3.5 here; no
+value-coverage damage). **CHAMPION: gen-5b (`pv_gen5b_s128.msgpack`).**
+The recipe above is already updated (100% newest-PUCT). In order:
 
-1. **PUCT@64 deployed check, gen-5b vs gen-4** (greedy K=8/sims=64, the
-   historical gate config). This is the one risk the raw gate can't see:
-   gen-5b's value head trained on champion-self-play positions only, and
-   it is the search leaf. Expect compression (gen-4's +15 raw read +3.5
-   here); pass = positive-or-flat. Clears gen-5b as champion and as the
-   gen-6 generator — run before spending 2×4 budget on collection.
-2. **gen-6 on the new recipe** (gen-5b generator, sims=128/K=8, 100% PUCT,
+1. **gen-6 on the new recipe** (gen-5b generator, sims=128/K=8, 100% PUCT,
    raw-vs-raw gate, two seeds). Re-measure the operator while the corpus
    collects (gen-5b PUCT@128 vs gen-5b raw, seed-looped ≤80 pairs): +26 at
    gen-3 → +11 at gen-4 → ? — the fuel gauge for how long the crank runs.
-3. **JTR re-calibration at gen-5b** (owed since gen-4) — the
-   self-relative→absolute conversion rate vs gen-3's −22/game.
+2. **JTR re-calibration at gen-5b** (owed since gen-4) — the
+   self-relative→absolute conversion rate vs gen-3's −22/game. The
+   searched agent has moved little since gen-3 (+3.5, then +2.2 ns at
+   PUCT@64), so expect the VALUE head to cap the conversion.
 
-Queued: target sharpening (sims 256 / K 16) and Step-4 value-head scaling —
-revisit at the next deceleration; with the anchor gone, a flat raw gate
-will then mean saturation for real.
+Queued: Step-4 value-head scaling (the deployed-strength cap) and target
+sharpening (sims 256 / K 16) — revisit at the next deceleration; with the
+anchor gone, a flat raw gate will then mean saturation for real.

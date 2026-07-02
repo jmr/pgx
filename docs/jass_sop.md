@@ -1,9 +1,10 @@
 # Jass PUCT loop — Standard Operating Procedure (per generation)
 
 Runbook for one generation of the Step-3 PUCT expert-iteration loop
-(gen `SRC` → gen `GEN`). Strategy, history, and results live in
-`docs/jass_plan.md`; this file is the *how*. Update it when the procedure
-changes (e.g. the gate change of 2026-06-21).
+(gen `SRC` → gen `GEN`). Strategy and current state live in
+`docs/jass_plan.md`, dated results and diagnostics in
+`docs/jass_experiment_log.md`; this file is the *how*. Update it when the
+procedure changes (e.g. the gate change of 2026-06-21).
 
 ## The single anchor (do this first, every cell)
 
@@ -75,7 +76,7 @@ collection (training uses 1 chip regardless; corpus is on Drive). Then:
 ## Stage 3 — Gate (CPU, `JAX_PLATFORMS=cpu`, minutes)
 
 **PROGRESS gate = raw-vs-raw** (changed 2026-06-21; PUCT@64 went blind to
-policy gains — see jass_plan REFRAME):
+policy gains — see the gen-4 REFRAME entry in jass_experiment_log.md):
 
 ```python
 new_raw = make_policy_action_fn(pv_model.apply, new_params, temperature=0.05)

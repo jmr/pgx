@@ -118,26 +118,31 @@ pool: `np.concatenate([policy_match(a, b, PRNGKey(s), 80) for s in range(3)])`
   raw. Large + while PUCT-vs-PUCT is flat = the search is masking real policy
   gains (this is now the standing gate, above).
 
-## Current strategic state (2026-07-02)
+## Current strategic state (2026-07-02, end of day)
 
-**The loop is RE-OPENED — the gen-5 flat gates were the 50% step2 anchor,
-not saturation.** The mix ablation's dose-response (all on the same gen-4
-corpus): adoption of teacher corrections rises as the anchor shrinks
-(16.5% → 24.7% → 33.5% at 50/20/0%), and the 0% retrain climbed
-**+11.8/+16.2 raw vs gen-4**, then **passed the PUCT@64 deployed check**
-(+2.2 ns — normal compression, gen-4's +15 raw read +3.5 here; no
-value-coverage damage). **CHAMPION: gen-5b (`pv_gen5b_s128.msgpack`).**
-The recipe above is already updated (100% newest-PUCT). In order:
+**The sims=128 loop is CONVERGED — for real this time.** gen-6 (the first
+generation collected and trained fully on the 100%-PUCT recipe) gated flat
+(+2.1/+1.3 ns) with every artifact ruled out, and the operator fuel gauge
+collapsed: gen-5b PUCT@128 vs gen-5b raw = **+3.0 ns** (240 pairs), after
++26 (gen-3) → +11 (gen-4). The teacher has nothing left at this search
+depth. **CHAMPION stays gen-5b (`pv_gen5b_s128.msgpack`).** Context: the
+JTR re-calibration says model gains DO convert to absolute strength (gap
+to POWERFUL halved, −22 → ≈−9.5/game), so making the model better again is
+worth real effort. In order:
 
-1. **gen-6 on the new recipe** (gen-5b generator, sims=128/K=8, 100% PUCT,
-   raw-vs-raw gate, two seeds). Re-measure the operator while the corpus
-   collects (gen-5b PUCT@128 vs gen-5b raw, seed-looped ≤80 pairs): +26 at
-   gen-3 → +11 at gen-4 → ? — the fuel gauge for how long the crank runs.
-2. **JTR re-calibration at gen-5b** (owed since gen-4) — the
-   self-relative→absolute conversion rate vs gen-3's −22/game. The
-   searched agent has moved little since gen-3 (+3.5, then +2.2 ns at
-   PUCT@64), so expect the VALUE head to cap the conversion.
+1. **Cheap CPU probe (minutes, no collection):** does the operator re-open
+   at sharper search? gen-5b PUCT@256 (and/or K=16) vs gen-5b raw,
+   seed-looped at **≤40 pairs/chunk** (the @256 tree ~doubles the @128
+   working set that already OOMs above ~80 pairs).
+2. **If a real margin re-opens → gen-7 at sims=256/K=16.** Re-profile the
+   per-chip collect optimum first (B×K≈512 → expect per-chip batch ~32)
+   and budget ~2× Stage-1 wall-clock.
+3. **If still ~0 → Step-4 value-head scaling** (attention over the 36 card
+   rows vs mean pool) is the only live lever; deeper search on the current
+   value head teaches nothing.
 
-Queued: Step-4 value-head scaling (the deployed-strength cap) and target
-sharpening (sims 256 / K 16) — revisit at the next deceleration; with the
-anchor gone, a flat raw gate will then mean saturation for real.
+Optional confirmatory check (cheap, not decision-relevant): gen-6 top-1
+adoption on the held-out batch (the mix-ablation diagnostic). Prediction if
+the exhaustion story is right: gen-6 agrees with the gen-5b teacher at a
+high rate and the correction share (36.6% at gen-4) has shrunk — few
+corrections left to adopt.

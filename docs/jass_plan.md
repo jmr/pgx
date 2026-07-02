@@ -315,7 +315,7 @@ rollout-baseline yardstick moved for the first time since Step 0:
 extension = gen-0; policy-only reached +33, matching the teacher). That is
 the number generation 1 had to beat. **STEP 2 CLOSED 2026-06-13.**
 
-## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: LOOP RE-OPENED 2026-07-02 — the gen-5 flat gates were the 50% step2 anchor, not saturation: gen-5b (100% PUCT epochs on the same gen-4 corpus) climbs **+11.8/+16.2 raw** vs gen-4 and passed the PUCT@64 deployed check (+2.2 ns). **CHAMPION: `pv_gen5b_s128.msgpack`.** Standing recipe: **100% newest-PUCT**, sims=128, K=8. NEXT: gen-6 crank + operator re-measure; JTR re-calibration. Procedure → docs/jass_sop.md]
+## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: CONVERGED AT sims=128, 2026-07-02 — gen-6 (first fresh-corpus gen on the 100% recipe) gated flat (+2.1/+1.3 ns) AND the operator fuel gauge collapsed (+26 → +11 → **+3.0 ns** at gen-5b): the sims=128/K=8 teacher is exhausted, with no artifact left to blame. **CHAMPION: `pv_gen5b_s128.msgpack`.** NEXT: cheap CPU probe of the operator at sims=256/K=16; if it re-opens → gen-7 on sharper targets, if ~0 → Step-4 value-head scaling is the only live lever. Procedure → docs/jass_sop.md]
 
 Implemented 2026-06-12 in `pgx/_src/games/jass_puct.py` (`puct_search`,
 `puct_action`, `make_puct_action_fn`, `make_puct_policy_fn`,

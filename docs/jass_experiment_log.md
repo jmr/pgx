@@ -778,3 +778,45 @@ through JTR's real-PUCT integration (swapped-deal paired t-test).
   the POWERFUL-calibration runs were ~3× faster per game (~1.2 s/game) since
   classical random rollouts are cheaper per node than repeated NN forward
   passes on both sides.
+
+## 2026-07-02 — GENERATION 6 — GATE FLAT; operator fuel gauge ≈ 0 — the sims=128 teacher is EXHAUSTED
+
+First generation collected AND trained entirely on the new recipe (gen-5b
+generator, `corpus_puct_gen5b_16x2048_s128k8.pickle` @ sims=128/K=8, 100%
+newest-PUCT, 20k epochs). **Champion stays gen-5b.**
+
+- Training healthy: reached 20k, eval value loss **0.1331** (the 0.13–0.14
+  band); fingerprints differ (`new_params` ≠ `src_params`) — not an artifact.
+- **Gate — gen-6 raw vs gen-5b raw** (τ=0.05, 300 pairs/seed): **seed 0
+  +2.1 (p=0.18), seed 2 +1.3 (p=0.44) — both ns.** This is the first flat
+  gate with no artifact left to blame: the anchor is retired, the standing
+  gate is raw-vs-raw (no gate masking), provenance/health clean. Per the
+  gen-5b promotion entry's pre-registration, a flat raw gate now means
+  saturation for real.
+- **Operator fuel gauge — gen-5b PUCT@128 (greedy, K=8) vs gen-5b raw
+  (τ=0.05)**, 80 pairs × 3 seeds = 240 pairs (same method as the gen-5
+  diagnostic): **+3.0/game, p=0.18 ns.** Trendline: **+26 (gen-3) → +11.1
+  (gen-4) → +3.0 ns (gen-5b)** — search at sims=128 is now statistically
+  indistinguishable from the raw policy it wraps.
+- **Verdict: the sims=128/K=8 teacher is EXHAUSTED — gen-6's flat gate is
+  fuel exhaustion, not a training failure.** The corpus targets contained
+  essentially nothing beyond gen-5b raw, so there was nothing to distill.
+  This completes the mechanism story across generations: at gen-5 the
+  operator still held +11 but ~0% of it distilled into argmax (target S/N,
+  peak visit mass 0.37 on corrections); at gen-5b the operator margin
+  itself is gone. Policy expert-iteration at sims=128 has genuinely
+  converged — the anchor explained the *previous* plateau, not this one.
+- **Next (both pre-registered in the gen-5 REDIRECT):**
+  1. **Cheap CPU probe before any collection:** does the operator re-open
+     at sharper search? gen-5b PUCT@256 (and/or K=16) vs gen-5b raw,
+     seed-looped — drop to ≤40 pairs/chunk, the @256 tree roughly doubles
+     the @128 working set that already OOMs above ~80 pairs. A real margin
+     at 256 = the crank restarts with sharper targets (→ gen-7 at
+     sims=256/K=16, after re-profiling the per-chip collect optimum;
+     B×K≈512 says expect per-chip batch ~32 and ~2× Stage-1 wall-clock).
+     Still ~0 = more search on the current net teaches nothing.
+  2. **Step-4 value-head scaling** (attention over the 36 card rows vs mean
+     pool): a better leaf evaluator is what would make deeper search
+     decisive again, and the JTR re-calibration (above) shows model gains
+     convert to absolute strength. If the @256 probe comes back ~0, this
+     becomes the only live lever.

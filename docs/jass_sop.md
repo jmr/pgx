@@ -128,28 +128,27 @@ search axis that re-opens the operator at gen-5b: @128 K=8 **+3.0 p=0.18**,
 vs the +11–26 margins that drove real climbs. The leaf evaluator is the
 cap. **CHAMPION stays gen-5b (`pv_gen5b_s128.msgpack`).**
 
-- **Now:** Step-4 value-head scaling — attention over the 36 card rows
-  replacing mean pooling (see jass_plan Step 4). Motivation: JTR says model
-  gains convert to absolute strength (gap to POWERFUL halved, −22 →
-  ≈−9.5/game). **Code landed 2026-07-03: `PolicyValueNetAttn`** (393k
-  params vs 111k). Colab run (**gen-6b** — the architecture arm of gen-6,
-  same corpus, mirroring how gen-5b was the recipe arm of gen-5):
-  - Train from scratch on the existing gen-5b corpus
-    (`corpus_puct_gen5b_16x2048_s128k8.pickle`) — zero collection, clean
-    A/B vs gen-6 which trained PolicyValueNet on this exact corpus and
-    gated flat. Same recipe otherwise: 100% PUCT, 20k epochs,
-    `policy_weight=1.0`, `augment=True`, but
-    `train_pv_model(model=PolicyValueNetAttn(), ...)` and NEW paths:
-    `pv_gen6b_s128_ckpt.msgpack` / `pv_gen6b_s128.msgpack`. ⚠ Never
-    restore a PolicyValueNet file into the attn net (template trap);
-    fingerprint as usual. Attn forward is ~6.5× on CPU — re-time one
-    training step before assuming the 1 h Stage-2 budget holds.
-  - Gates, in order: (1) raw vs gen-5b raw, τ=0.05, 300 pairs × seeds
-    0/2 — did architecture alone convert the corpus gen-6 couldn't?
-    (2) PUCT@64 vs gen-5b PUCT@64 deployed check — the value head is the
-    whole point; unlike the policy climbs this one should MOVE if the
-    upgrade works. (3) Eval value loss vs the 0.13–0.14 band for
-    reference only.
+- **Now:** Step-4 value-head scaling (see jass_plan Step 4). Motivation:
+  JTR says model gains convert to absolute strength (gap to POWERFUL
+  halved, −22 → ≈−9.5/game). **First arm NEGATIVE (2026-07-03, full
+  entry in the log): gen-6b = `PolicyValueNetAttn` trained on gen-6's
+  corpus — eval value loss 0.1476 (old arch: 0.1331, same holdout
+  construct), raw gate +2.8 ns, PUCT@64 deployed check +1.0 ns. NOT
+  promoted.** Read: optimization smell, not a capacity verdict (a
+  capacity-superset net converged to a worse loss; flat Adam 3e-4, no
+  warmup). Next arms, in cost order:
+  1. **lr warmup + small lr sweep** on the same corpus (~1 h/arm with
+     `data_parallel=True`): e.g. linear warmup 1k epochs → cosine or
+     constant, lr {1e-4, 3e-4, 1e-3}. Success signal BEFORE any arena:
+     eval value loss clearly below 0.133.
+  2. **Value-only attention variant**: keep the old (cheap, proven)
+     policy path, spend the attention capacity on the value head alone —
+     the original Step-4 framing.
+  - Cell mechanics for any attn arm: `model=PolicyValueNetAttn(...)`,
+    NEW ckpt/final paths per arm, never restore a PolicyValueNet file
+    into an attn net (template trap), and gate cells need TWO model
+    instances (`attn_model.apply` for the new params, `pv_model.apply`
+    for the champion's).
 - **Training on the 2×4: `train_pv_model(..., data_parallel=True)`**
   (landed 2026-07-03) — pmaps the train step over all local chips
   (batches sharded, grads psum'd; same update math, checkpoints stay

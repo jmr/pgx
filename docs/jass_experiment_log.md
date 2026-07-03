@@ -854,3 +854,43 @@ scaled to the tree working set (80×3 / 40×6 / 20×12 for K·sims of
   a function of the leaf evaluator, so after the value-head upgrade
   trains, re-run this exact probe (K=16 arm first — it was the live axis)
   before deciding whether to crank generations again.
+
+## 2026-07-03 — gen-6b (PolicyValueNetAttn, first Step-4 net): NEGATIVE — not promoted
+
+First architecture arm: `PolicyValueNetAttn` (header broadcast into each
+card row, 2 pre-LN self-attention blocks over the 36 rows, 4 heads,
+hidden 128, learned-query attention pool replacing the mean; 393k params
+vs 111k), trained from scratch on gen-6's exact corpus
+(`corpus_puct_gen5b_16x2048_s128k8.pickle`, 100% PUCT, 20k epochs,
+`policy_weight=1.0`, `augment=True`, flat Adam 3e-4) → 
+`pv_gen6b_s128.msgpack`. Clean A/B vs gen-6, which trained
+PolicyValueNet on this corpus and gated flat.
+
+- **Training:** eval value loss **0.1476** — WORSE than the old
+  architecture's 0.1331/0.1332 on the same corpus/holdout construct;
+  policy CE 0.9506. Plateau confirmed by a 20k→21.4k extension probe
+  (v oscillates 0.1468–0.1507, no trend) — fully trained, not
+  undertrained at this lr.
+- **Raw gate vs gen-5b raw** (τ=0.05, 300 pairs, seed 0): **+2.8,
+  t=1.5, p=0.13 ns** — same band as gen-6's flat gate (+2.1/+1.3),
+  as expected: the corpus's policy targets are exhausted (gen-6 entry).
+- **PUCT@64 deployed check vs gen-5b** (greedy K=8/sims=64, 300 pairs,
+  seed 0): **+1.0, t=0.49, p=0.62 ns** — the decisive test for the
+  value-head hypothesis, and it's flat. Policy-only gains compress to
+  +2–3.5 at this gate (gen-4/gen-5b), so a real leaf-evaluator win had
+  to read clearly above that; it didn't.
+- **VERDICT: NOT promoted; champion stays gen-5b.** But the architecture
+  is not yet condemned: attention is a capacity superset (it can
+  ~emulate mean-pool + the context head), yet it converged to a *worse*
+  loss — an **optimization smell, not a capacity verdict**. Flat Adam
+  3e-4 without warmup on transformer blocks is the standard way to get
+  exactly this. **Next, in cost order: (1) lr warmup + small lr sweep
+  (~1 h/arm on the 2×4 now); (2) value-only attention variant** (keep
+  the old policy path, spend the new capacity on the value head alone —
+  the original Step-4 framing). Keep `pv_gen6b_s128.msgpack`.
+- Operational (details in SOP): the attn net OOM'd the standard
+  2048-game train step (needs ~33 G vs 15.75 G/chip) → added
+  `accum_steps` (gradient accumulation) and `data_parallel=True` (pmap
+  over the 2×4; 20 s/100 epochs vs 90 s on 1×1+accum; a mid-run
+  1×1→2×4 checkpoint handoff worked). Standing preference: one 2×4
+  instance for everything while Step 3 is closed.

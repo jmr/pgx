@@ -95,7 +95,10 @@ slots + `pv_gen0.msgpack` (Step 2 PolicyValueNet, run 3 @ 20k = gen-0),
 `pv_gen4_s128.msgpack`,
 `pv_gen5_s128.msgpack` (50/50 — trained, NOT promoted; keep),
 **`pv_gen5b_s128.msgpack` (0% anchor — CHAMPION; the final mix100 net; do
-NOT overwrite `pv_gen5_s128.msgpack`)**.
+NOT overwrite `pv_gen5_s128.msgpack`)**, `pv_gen6_s128.msgpack` (flat
+gate, NOT promoted; keep), `pv_gen6b_s128.msgpack` (PolicyValueNetAttn —
+⚠ different architecture, needs `PolicyValueNetAttn().apply`; NOT
+promoted; keep).
 Corpora: `corpus_k8_v1_24x4096.pkl` (Step 2 — RETIRED from training
 2026-07-02, keep on Drive), `corpus_puct_gen0_8x4096_s16k8.pickle` (gen-1's
 sims=16 corpus),
@@ -449,7 +452,7 @@ Levers, **REORDERED by the measurement** (batch-fix first, then chips):
    subtree reuse (re-determinize every move, nothing to carry); any
    data-parallel trick (collection is *already* the parallel stage).
 
-## Step 4 — Scale and benchmark externally  [Status: IN PROGRESS — external benchmark DONE (gen-3 calibrated 2026-06-20, gen-5b re-calibrated 2026-07-02: gap to POWERFUL roughly HALVED, −22/game → ≈−9.5/game). Net scaling: IN PROGRESS since 2026-07-03 — value head first (attention over the 36 card rows vs mean pooling), per the sharpening-probe DECISION in the log: no search axis re-opens the operator on the current net, the leaf evaluator is the cap]
+## Step 4 — Scale and benchmark externally  [Status: IN PROGRESS — external benchmark DONE (gen-3 calibrated 2026-06-20, gen-5b re-calibrated 2026-07-02: gap to POWERFUL roughly HALVED, −22/game → ≈−9.5/game). Net scaling: IN PROGRESS since 2026-07-03 — value head first (attention over the 36 card rows vs mean pooling), per the sharpening-probe DECISION in the log: no search axis re-opens the operator on the current net, the leaf evaluator is the cap. First arm (gen-6b, shared-trunk PolicyValueNetAttn, standing recipe) NEGATIVE 2026-07-03 — worse eval value loss (0.148 vs 0.133) and flat gates; read as an optimization problem (flat 3e-4, no warmup), not a capacity verdict. Next: lr warmup/sweep, then a value-only-attention variant — see jass_sop.md "Current strategic state" and the log entry]
 
 - Net scaling: attention over the 36 card rows is the natural upgrade from
   mean pooling; then width/depth, more simulations, larger batches.

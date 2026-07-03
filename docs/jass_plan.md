@@ -9,7 +9,35 @@ markers as work completes. **Dated experiment results and diagnostics live in
 `docs/jass_experiment_log.md`** (append new results there; this file keeps
 conclusions and pointers). The per-generation procedure is `docs/jass_sop.md`.
 
-## Status snapshot (2026-07-02)
+## Status snapshot (2026-07-03)
+
+**CHAMPION: gen-6b_es (`pv_gen6b_es_s128.msgpack`) — the first Step-4
+net: `PolicyValueNetAttn` (self-attention over the 36 card rows +
+learned-query attention pooling, 393k params), trained on gen-6's corpus
+and EARLY-STOPPED at 7k epochs** (the architecture overfits from ~8k —
+the full-20k run gated flat; the eval-v U-curve bottoms at ~0.115 vs the
+old architecture's 0.133 floor). Gates vs gen-5b: **raw +10.3/+7.4
+(t=6.0/4.38, both seeds)** — a generation-class climb from a corpus that
+had gated flat twice for the old architecture — and **PUCT@64 deployed
++5.2 (t=2.59, p=0.01), the first significant deployed-strength gain
+since gen-3**, clearing the +2–3.5 band where pure-policy gains
+compress: the value-head upgrade converts to searched strength. Full arc
+(OOM → accum/data_parallel, overfit post-mortem, U-curve, interpretation
+corrections — notably: gen-6's "fuel exhaustion" was
+architecture-relative, the corpus held +10 the old net couldn't extract)
+in the experiment log, 2026-07-03 entries.
+
+**NEXT: (1) operator re-probe on gen-6b_es** (PUCT vs own raw, K=16 arm
+first — pre-registered by the sharpening-probe DECISION; a jump off ~0
+restarts the Step-3 crank → gen-7); **(2) weight-decay arm**
+(`optimizer=optax.adamw(...)`) to hold ~0.115 at convergence without
+hand-picked stopping epochs; **(3) before gen-7 Stage 1:** re-profile the
+per-chip collect optimum for the attn net (~6.5× forward) and add attn
+support to the JTR export scripts (they hardcode `PolicyValueNet()`).
+Training now runs on the 2×4 (`data_parallel=True`, ~20 s/100 epochs →
+7k in ~25 min).
+
+## Previous snapshot (2026-07-02)
 
 **The gen-5 "saturation" was the RECIPE, not the loop — the 50% step2
 anchor was the plateau.** The pre-registered mix ablation (retrains on the
@@ -96,9 +124,12 @@ slots + `pv_gen0.msgpack` (Step 2 PolicyValueNet, run 3 @ 20k = gen-0),
 `pv_gen5_s128.msgpack` (50/50 — trained, NOT promoted; keep),
 **`pv_gen5b_s128.msgpack` (0% anchor — CHAMPION; the final mix100 net; do
 NOT overwrite `pv_gen5_s128.msgpack`)**, `pv_gen6_s128.msgpack` (flat
-gate, NOT promoted; keep), `pv_gen6b_s128.msgpack` (PolicyValueNetAttn —
-⚠ different architecture, needs `PolicyValueNetAttn().apply`; NOT
-promoted; keep).
+gate, NOT promoted; keep), `pv_gen6b_s128.msgpack` (attn @ 20k —
+overfit; NOT promoted; keep),
+**`pv_gen6b_es_s128.msgpack` (attn @ 7k early-stop — CHAMPION
+2026-07-03; ⚠ PolicyValueNetAttn architecture, needs
+`PolicyValueNetAttn().apply` — a PolicyValueNet template silently
+mangles it)**.
 Corpora: `corpus_k8_v1_24x4096.pkl` (Step 2 — RETIRED from training
 2026-07-02, keep on Drive), `corpus_puct_gen0_8x4096_s16k8.pickle` (gen-1's
 sims=16 corpus),
@@ -318,7 +349,7 @@ rollout-baseline yardstick moved for the first time since Step 0:
 extension = gen-0; policy-only reached +33, matching the teacher). That is
 the number generation 1 had to beat. **STEP 2 CLOSED 2026-06-13.**
 
-## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: CLOSED ON THIS NET 2026-07-03 — gen-6 gated flat (+2.1/+1.3 ns, no artifact left to blame) and the sharpening probe found no search axis that re-opens the operator at gen-5b (+3.0/+2.4/+3.8, all ns, vs the +11–26 that drove climbs): the leaf evaluator is the cap. **CHAMPION: `pv_gen5b_s128.msgpack`.** RE-OPENS after the Step-4 value-head upgrade — re-run the operator probe (K=16 arm first), then decide on gen-7. Procedure → docs/jass_sop.md]
+## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: CLOSED ON THIS NET 2026-07-03 — gen-6 gated flat (+2.1/+1.3 ns, no artifact left to blame) and the sharpening probe found no search axis that re-opens the operator at gen-5b (+3.0/+2.4/+3.8, all ns, vs the +11–26 that drove climbs): the leaf evaluator is the cap. **CHAMPION since 2026-07-03: `pv_gen6b_es_s128.msgpack` (PolicyValueNetAttn — the Step-4 upgrade landed and PROMOTED).** The pre-registered re-open test is NOW DUE: re-run the operator probe on gen-6b_es (K=16 arm first), then decide on gen-7. Procedure → docs/jass_sop.md]
 
 Implemented 2026-06-12 in `pgx/_src/games/jass_puct.py` (`puct_search`,
 `puct_action`, `make_puct_action_fn`, `make_puct_policy_fn`,
@@ -374,6 +405,8 @@ operational war stories in `docs/jass_experiment_log.md`):**
 | gen-4 (s128) | PUCT@64 +2.6/+4.4; **raw +15.0** | PROMOTED — PUCT@64 gate went blind; progress gate → raw-vs-raw |
 | gen-5 (s128, 50/50) | raw **+1.5 / +2.4 ns**; PUCT@16 +0.5 | NOT promoted — the flat gate was the step2 anchor (see gen-5b) |
 | gen-5b (s128, **0% step2**, same gen-4 corpus) | raw **+11.8 / +16.2** (t=6.7/8.0); PUCT@64 +2.2 ns | PROMOTED — anchor was the plateau; deployed check passed |
+| gen-6 (s128, gen-5b corpus) | raw +2.1 / +1.3 ns | NOT promoted — read then as "sims=128 teacher exhausted" (corrected: architecture-relative, see gen-6b_es) |
+| gen-6b_es (**PolicyValueNetAttn @ 7k epochs**, same gen-5b corpus) | raw **+10.3 / +7.4** (t=6.0/4.38); **PUCT@64 +5.2 (p=0.01)** | PROMOTED — first Step-4 net; first significant deployed gain since gen-3 |
 
 Mechanism lessons pinned along the way (details in the log):
 
@@ -452,7 +485,7 @@ Levers, **REORDERED by the measurement** (batch-fix first, then chips):
    subtree reuse (re-determinize every move, nothing to carry); any
    data-parallel trick (collection is *already* the parallel stage).
 
-## Step 4 — Scale and benchmark externally  [Status: IN PROGRESS — external benchmark DONE (gen-3 calibrated 2026-06-20, gen-5b re-calibrated 2026-07-02: gap to POWERFUL roughly HALVED, −22/game → ≈−9.5/game). Net scaling: IN PROGRESS since 2026-07-03 — value head first (attention over the 36 card rows vs mean pooling), per the sharpening-probe DECISION in the log: no search axis re-opens the operator on the current net, the leaf evaluator is the cap. First arm (gen-6b, shared-trunk PolicyValueNetAttn, standing recipe) NEGATIVE 2026-07-03 — worse eval value loss (0.148 vs 0.133) and flat gates; post-mortem: OVERFITTING (value head fits seen data 0.073 vs holdout 0.147; gen-5b's gap is zero — capacity ample, regularization missing). Next: weight decay (adamw), then dropout / value-only attention — see jass_sop.md "Current strategic state" and the log entries]
+## Step 4 — Scale and benchmark externally  [Status: IN PROGRESS — external benchmark DONE (gen-3 calibrated 2026-06-20, gen-5b re-calibrated 2026-07-02: gap to POWERFUL roughly HALVED, −22/game → ≈−9.5/game). Net scaling: IN PROGRESS since 2026-07-03 — value head first (attention over the 36 card rows vs mean pooling), per the sharpening-probe DECISION in the log: no search axis re-opens the operator on the current net, the leaf evaluator is the cap. First arm (gen-6b, shared-trunk PolicyValueNetAttn, standing recipe) first arm resolved 2026-07-03: full-20k training OVERFITS (value head fits seen data 0.073 vs holdout 0.147; gen-5b's gap is zero) but **early-stopped at 7k it PROMOTED — gen-6b_es is CHAMPION** (raw +10.3/+7.4, PUCT@64 +5.2 p=0.01, first significant deployed gain since gen-3). Remaining: weight-decay arm to replace hand-picked stopping; attn support in the JTR export scripts; re-profile collection for the attn net — see jass_sop.md "Current strategic state" and the log entries]
 
 - Net scaling: attention over the 36 card rows is the natural upgrade from
   mean pooling; then width/depth, more simulations, larger batches.

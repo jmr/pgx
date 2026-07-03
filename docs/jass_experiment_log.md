@@ -927,3 +927,60 @@ augmentation; holdout = the eval batch):
   blocks, then num_layers=1 (smaller attn net). Note plain adamw decays
   LayerNorm/bias params too (usually masked out in transformer recipes)
   — acceptable for the first arm, revisit if it underperforms.
+  (Superseded same day by the early-stopping arm below, which promoted;
+  the decay arm remains queued as the principled replacement for
+  hand-picked stopping epochs.)
+
+## 2026-07-03 — gen-6b_es (attn, early-stopped @ 7k): PROMOTED — first significant deployed-strength gain since gen-3
+
+The full-log retrain of the exact gen-6b recipe traced the predicted
+U-curve: **eval v bottoms at ~0.1146–0.1150, flat from ~6.0k to ~7.6k
+epochs** (14% below the old architecture's 0.133 floor), overfit onset
+~8k (v climbs monotonically after — 0.118 @ 9.5k, 0.126 @ 12k, headed
+back to run 1's 0.147; train v falls throughout). Policy CE converged by
+7k (0.9509 vs run 1's 20k 0.9508). Run killed at 12k; **early-stopped
+retrain to 7,000 epochs** (same recipe, fresh anchor) →
+`pv_gen6b_es_s128.msgpack`, gated vs champion gen-5b:
+
+- **Raw gate (promotion): seed 0 +10.3, t=6.0; seed 2 +7.4, t=4.38** —
+  both p«0.05, a generation-class climb (gen-2/gen-5b band), from the
+  SAME corpus that gated flat twice (gen-6 old-arch +2.1/+1.3 ns;
+  gen-6b full-20k +2.8 ns).
+- **PUCT@64 deployed check: +5.2, t=2.59, p=0.01** — significantly
+  positive AND above the +2–3.5 band where pure-policy gains compress
+  (gen-4 +3.5, gen-5b +2.2 ns). First significant movement at this gate
+  since gen-3: **the value-head upgrade converts to searched strength**,
+  and no value-coverage damage from the off-distribution risk (new
+  architecture, leaves trained on gen-5b self-play, early-stopped).
+- **PROMOTED: gen-6b_es (`pv_gen6b_es_s128.msgpack`) is CHAMPION** and
+  the generator for any gen-7 collection.
+
+**Two interpretation corrections this result forces:**
+
+1. **The gen-6 "fuel exhaustion" verdict was architecture-relative.**
+   The corpus was not exhausted — it held a +10-class policy gain and a
+   14% value-loss gain that the old architecture could not convert
+   (and the full-20k attn run destroyed by memorization). "Nothing left
+   to distill" should have been "nothing this net can extract." The
+   operator fuel gauge (+3.0 ns at gen-5b) measures the *teacher's*
+   margin over the raw policy, not the corpus's distillable content for
+   a better student.
+2. **Policy CE is blind even to generation-class play differences**:
+   the 20k and 7k nets differ by eval CE 0.0001 (0.9508 vs 0.9509) and
+   by +10/game in play. The standing "diagnose by top-1 agreement, not
+   CE" lesson, strongest form yet.
+
+**Next (in order):**
+1. **Operator re-probe on gen-6b_es** (its PUCT vs its own raw, K=16 arm
+   first, then @128 K=8 baseline; seed-looped chunks per the SOP memory
+   rule) — the 2026-07-03 sharpening-probe DECISION pre-registered this:
+   a materially better net is what re-opens Step 3. If the fuel gauge
+   jumps off ~0, gen-7 collection restarts with gen-6b_es as generator.
+2. **Weight-decay arm** (queued above): hold ≤0.115 at full convergence
+   so future generations don't need hand-picked stopping epochs.
+3. **Before gen-7 Stage 1:** re-profile the per-chip collect optimum —
+   the attn net's forward is ~6.5× the old net's (CPU, B=512), so the
+   B×K≈512 VMEM rule was profiled on the wrong net. Also: the JTR export
+   scripts (`extract_pv_weights.py` / `export_pv_savedmodel.py`)
+   hardcode `PolicyValueNet()` — they need attn support before the next
+   external calibration.

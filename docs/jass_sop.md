@@ -118,43 +118,45 @@ pool: `np.concatenate([policy_match(a, b, PRNGKey(s), 80) for s in range(3)])`
   raw. Large + while PUCT-vs-PUCT is flat = the search is masking real policy
   gains (this is now the standing gate, above).
 
-## Current strategic state (2026-07-03)
+## Current strategic state (2026-07-03, post-promotion)
 
-**The Step-3 crank is CLOSED on this net — current work is Step-4
-value-head scaling, not another generation.** gen-6 gated flat (+2.1/+1.3
-ns, all artifacts ruled out) and the 2026-07-03 sharpening probe found no
-search axis that re-opens the operator at gen-5b: @128 K=8 **+3.0 p=0.18**,
-@256 K=8 **+2.4 p=0.26**, @128 K=16 **+3.8 p=0.0698** (240 pairs/arm) —
-vs the +11–26 margins that drove real climbs. The leaf evaluator is the
-cap. **CHAMPION stays gen-5b (`pv_gen5b_s128.msgpack`).**
+**CHAMPION: gen-6b_es (`pv_gen6b_es_s128.msgpack`) — `PolicyValueNetAttn`
+early-stopped at 7k epochs.** Promoted 2026-07-03 on raw +10.3/+7.4
+(both seeds significant) and PUCT@64 deployed **+5.2 (p=0.01)** — the
+first significant deployed gain since gen-3, above the +2–3.5
+policy-compression band: the value-head upgrade converts to searched
+strength. Full arc in the log (overfit post-mortem → U-curve → early
+stop). ⚠ The champion is a DIFFERENT ARCHITECTURE: every cell that loads
+it needs `PolicyValueNetAttn().apply`; a `PolicyValueNet` template
+silently mangles the params. Gate cells against older generations need
+TWO model instances.
 
-- **Now:** Step-4 value-head scaling (see jass_plan Step 4). Motivation:
-  JTR says model gains convert to absolute strength (gap to POWERFUL
-  halved, −22 → ≈−9.5/game). **First arm NEGATIVE (2026-07-03, full
-  entry in the log): gen-6b = `PolicyValueNetAttn` trained on gen-6's
-  corpus — eval value loss 0.1476 (old arch: 0.1331, same holdout
-  construct), raw gate +2.8 ns, PUCT@64 deployed check +1.0 ns. NOT
-  promoted.** Post-mortem (same day, in the log): **OVERFITTING** — the
-  attn value head fits seen data at 0.073 (2× past gen-5b's 0.134
-  saturation) and generalizes at 0.147; gen-5b's seen-vs-holdout gap is
-  zero. Capacity ample, optimization fine, regularization missing. Next
-  arms, in cost order:
-  1. **Weight decay:** retrain with
-     `optimizer=optax.adamw(3e-4, weight_decay=1e-2)` (passthrough
-     landed 2026-07-03), same corpus, KEEP FULL LOGS (the eval-v curve
-     shape is diagnostic — U-curve minimum = early-stopping point).
-     Success signal BEFORE any arena: holdout v clearly below 0.133 with
-     the seen-vs-holdout gap staying closed.
-  2. **Dropout in the attention blocks**, then **num_layers=1** if decay
-     alone doesn't close the gap.
-  3. **Value-only attention variant**: keep the old (cheap, proven)
-     policy path, spend the attention capacity on the value head alone —
-     the original Step-4 framing.
-  - Cell mechanics for any attn arm: `model=PolicyValueNetAttn(...)`,
-    NEW ckpt/final paths per arm, never restore a PolicyValueNet file
-    into an attn net (template trap), and gate cells need TWO model
-    instances (`attn_model.apply` for the new params, `pv_model.apply`
-    for the champion's).
+- **The attn recipe (until the weight-decay arm lands): 7,000 epochs,
+  NOT 20k** — the architecture overfits from ~8k (eval-v U-curve bottoms
+  ~0.115 at 6.0–7.6k; 20k lands at 0.147 and gates flat). Everything
+  else per Stage 2, plus `model=PolicyValueNetAttn()` and
+  `data_parallel=True`. Training-health check for attn: eval v ≈
+  0.115 ± 0.002 at 7k (the old 0.13–0.14 band is the *old architecture's*
+  level).
+- **Now: operator re-probe on gen-6b_es** (pre-registered): its PUCT vs
+  its own raw, K=16 arm first, then @128 K=8; τ=0.05, seed-looped chunks
+  (80×3 / 20×12 for K·sims 8·128 / 16·128 — and the attn net's bigger
+  working set may need smaller chunks; if a chunk hangs, halve it). The
+  gen-5b baseline was +3.0/+3.8 ns; a jump off ~0 restarts Step 3 →
+  gen-7 collected by gen-6b_es.
+- **Queued arms:**
+  1. **Weight decay** (`optimizer=optax.adamw(3e-4, weight_decay=1e-2)`,
+     passthrough landed 2026-07-03): hold ~0.115 at full convergence so
+     future generations don't need hand-picked stopping epochs. Success:
+     holdout v ≤ 0.115 at 20k with the seen-vs-holdout gap closed.
+  2. **Dropout in the attention blocks** / `num_layers=1` if decay
+     can't close the gap.
+- **Before gen-7 Stage 1:** re-profile the per-chip collect optimum with
+  the attn generator (`profile_collect_fn` on 1×1) — the B×K≈512 rule
+  was profiled with the old net and the attn forward is ~6.5× (CPU,
+  B=512). **Before the next JTR calibration:** the export scripts
+  (`extract_pv_weights.py` / `export_pv_savedmodel.py`) hardcode
+  `PolicyValueNet()` — they need attn support.
 - **Training on the 2×4: `train_pv_model(..., data_parallel=True)`**
   (landed 2026-07-03) — pmaps the train step over all local chips
   (batches sharded, grads psum'd; same update math, checkpoints stay
@@ -168,13 +170,8 @@ cap. **CHAMPION stays gen-5b (`pv_gen5b_s128.msgpack`).**
   1×1→2×4 checkpoint handoff worked (resume + `data_parallel=True`). **Preference: run everything on one 2×4
   instance** (no 1×1↔2×4 stop/start); the old 1×1-for-training rule only
   mattered when collection competed for the 2×4.
-- **After the new net trains (and passes its gates):** re-run the operator
-  probe on the NEW net (gen-6b PUCT vs gen-6b raw; K=16 arm first — it was
-  the only near-significant axis) to see if the crank restarts; the
-  operator margin is a function of the leaf evaluator. Only then decide on
-  a gen-7 collection (which would be K=16: re-profile per-chip optimum,
-  B×K≈512 → ~32/chip, ~2× Stage-1 wall-clock — and the attn net's own
-  cost multiplies in; re-profile, don't assume).
-- Optional cheap confirmation of the exhaustion story: gen-6 top-1 adoption
-  on the held-out batch (prediction: high teacher agreement, correction
-  share well below gen-4's 36.6%).
+- Optional diagnostics: gen-6b_es top-1 adoption vs gen-5b on the
+  held-out batch (how much of the +10 is teacher-correction adoption vs
+  better generalization off the same targets); gen-6 top-1 adoption (the
+  old exhaustion-story check — now expected to show the corpus held
+  signal the old architecture couldn't take).

@@ -315,7 +315,7 @@ rollout-baseline yardstick moved for the first time since Step 0:
 extension = gen-0; policy-only reached +33, matching the teacher). That is
 the number generation 1 had to beat. **STEP 2 CLOSED 2026-06-13.**
 
-## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: CONVERGED AT sims=128, 2026-07-02 — gen-6 (first fresh-corpus gen on the 100% recipe) gated flat (+2.1/+1.3 ns) AND the operator fuel gauge collapsed (+26 → +11 → **+3.0 ns** at gen-5b): the sims=128/K=8 teacher is exhausted, with no artifact left to blame. **CHAMPION: `pv_gen5b_s128.msgpack`.** NEXT: cheap CPU probe of the operator at sims=256/K=16; if it re-opens → gen-7 on sharper targets, if ~0 → Step-4 value-head scaling is the only live lever. Procedure → docs/jass_sop.md]
+## Step 3 — PUCT via mctx (Option B) — the actual AlphaZero step  [Status: CLOSED ON THIS NET 2026-07-03 — gen-6 gated flat (+2.1/+1.3 ns, no artifact left to blame) and the sharpening probe found no search axis that re-opens the operator at gen-5b (+3.0/+2.4/+3.8, all ns, vs the +11–26 that drove climbs): the leaf evaluator is the cap. **CHAMPION: `pv_gen5b_s128.msgpack`.** RE-OPENS after the Step-4 value-head upgrade — re-run the operator probe (K=16 arm first), then decide on gen-7. Procedure → docs/jass_sop.md]
 
 Implemented 2026-06-12 in `pgx/_src/games/jass_puct.py` (`puct_search`,
 `puct_action`, `make_puct_action_fn`, `make_puct_policy_fn`,
@@ -449,7 +449,7 @@ Levers, **REORDERED by the measurement** (batch-fix first, then chips):
    subtree reuse (re-determinize every move, nothing to carry); any
    data-parallel trick (collection is *already* the parallel stage).
 
-## Step 4 — Scale and benchmark externally  [Status: IN PROGRESS — external benchmark DONE (gen-3 calibrated 2026-06-20, gen-5b re-calibrated 2026-07-02: gap to POWERFUL roughly HALVED, −22/game → ≈−9.5/game). Net scaling: TODO]
+## Step 4 — Scale and benchmark externally  [Status: IN PROGRESS — external benchmark DONE (gen-3 calibrated 2026-06-20, gen-5b re-calibrated 2026-07-02: gap to POWERFUL roughly HALVED, −22/game → ≈−9.5/game). Net scaling: IN PROGRESS since 2026-07-03 — value head first (attention over the 36 card rows vs mean pooling), per the sharpening-probe DECISION in the log: no search axis re-opens the operator on the current net, the leaf evaluator is the cap]
 
 - Net scaling: attention over the 36 card rows is the natural upgrade from
   mean pooling; then width/depth, more simulations, larger batches.

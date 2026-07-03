@@ -118,31 +118,25 @@ pool: `np.concatenate([policy_match(a, b, PRNGKey(s), 80) for s in range(3)])`
   raw. Large + while PUCT-vs-PUCT is flat = the search is masking real policy
   gains (this is now the standing gate, above).
 
-## Current strategic state (2026-07-02, end of day)
+## Current strategic state (2026-07-03)
 
-**The sims=128 loop is CONVERGED — for real this time.** gen-6 (the first
-generation collected and trained fully on the 100%-PUCT recipe) gated flat
-(+2.1/+1.3 ns) with every artifact ruled out, and the operator fuel gauge
-collapsed: gen-5b PUCT@128 vs gen-5b raw = **+3.0 ns** (240 pairs), after
-+26 (gen-3) → +11 (gen-4). The teacher has nothing left at this search
-depth. **CHAMPION stays gen-5b (`pv_gen5b_s128.msgpack`).** Context: the
-JTR re-calibration says model gains DO convert to absolute strength (gap
-to POWERFUL halved, −22 → ≈−9.5/game), so making the model better again is
-worth real effort. In order:
+**The Step-3 crank is CLOSED on this net — current work is Step-4
+value-head scaling, not another generation.** gen-6 gated flat (+2.1/+1.3
+ns, all artifacts ruled out) and the 2026-07-03 sharpening probe found no
+search axis that re-opens the operator at gen-5b: @128 K=8 **+3.0 p=0.18**,
+@256 K=8 **+2.4 p=0.26**, @128 K=16 **+3.8 p=0.0698** (240 pairs/arm) —
+vs the +11–26 margins that drove real climbs. The leaf evaluator is the
+cap. **CHAMPION stays gen-5b (`pv_gen5b_s128.msgpack`).**
 
-1. **Cheap CPU probe (minutes, no collection):** does the operator re-open
-   at sharper search? gen-5b PUCT@256 (and/or K=16) vs gen-5b raw,
-   seed-looped at **≤40 pairs/chunk** (the @256 tree ~doubles the @128
-   working set that already OOMs above ~80 pairs).
-2. **If a real margin re-opens → gen-7 at sims=256/K=16.** Re-profile the
-   per-chip collect optimum first (B×K≈512 → expect per-chip batch ~32)
-   and budget ~2× Stage-1 wall-clock.
-3. **If still ~0 → Step-4 value-head scaling** (attention over the 36 card
-   rows vs mean pool) is the only live lever; deeper search on the current
-   value head teaches nothing.
-
-Optional confirmatory check (cheap, not decision-relevant): gen-6 top-1
-adoption on the held-out batch (the mix-ablation diagnostic). Prediction if
-the exhaustion story is right: gen-6 agrees with the gen-5b teacher at a
-high rate and the correction share (36.6% at gen-4) has shrunk — few
-corrections left to adopt.
+- **Now:** Step-4 value-head scaling — attention over the 36 card rows
+  replacing mean pooling (see jass_plan Step 4). Motivation: JTR says model
+  gains convert to absolute strength (gap to POWERFUL halved, −22 →
+  ≈−9.5/game).
+- **After the new net trains:** re-run the operator probe (K=16 arm first —
+  it was the only near-significant axis) to see if the crank restarts; the
+  operator margin is a function of the leaf evaluator. Only then decide on
+  a gen-7 collection (which would be K=16: re-profile per-chip optimum,
+  B×K≈512 → ~32/chip, ~2× Stage-1 wall-clock).
+- Optional cheap confirmation of the exhaustion story: gen-6 top-1 adoption
+  on the held-out batch (prediction: high teacher agreement, correction
+  share well below gen-4's 36.6%).

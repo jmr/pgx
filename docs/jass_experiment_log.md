@@ -820,3 +820,37 @@ newest-PUCT, 20k epochs). **Champion stays gen-5b.**
      decisive again, and the JTR re-calibration (above) shows model gains
      convert to absolute strength. If the @256 probe comes back ~0, this
      becomes the only live lever.
+
+## 2026-07-03 — Sharpening probe at gen-5b: NO search axis re-opens the operator — DECISION: pivot to Step-4 value-head scaling
+
+The probe pre-registered yesterday: gen-5b PUCT (greedy) vs gen-5b raw
+(τ=0.05), `policy_match`, 240 pairs per arm, seed-looped with chunk size
+scaled to the tree working set (80×3 / 40×6 / 20×12 for K·sims of
+8·128 / 8·256 / 16·128 — the B×K rule applied to the diagnostic).
+
+| arm                  | mean/game | p      |
+|----------------------|-----------|--------|
+| @128, K=8 (baseline) | +3.0      | 0.18   |
+| @256, K=8            | +2.4      | 0.26   |
+| @128, K=16           | +3.8      | 0.0698 |
+
+- **Doubling sims bought nothing** (+2.4 vs the +3.0 baseline) — the search
+  is not depth-limited; the leaf evaluations feeding it are the constraint.
+- **K=16 is the best arm and near-significant** — determinization noise is
+  plausibly a real, small effect. But the magnitude is decision-irrelevant:
+  +4 of fuel sits in the same band as the exhausted baseline, nothing like
+  the +11–26 margins that drove actual climbs. And gen-6 just calibrated
+  fuel→gate conversion on this recipe: +3.0 of operator margin produced a
+  +2 ns gate. A K=16 corpus (+~4 fuel, 2× collection working set) projects
+  to another flat generation. Not run to more seeds on purpose — a firmer
+  +3.8 changes nothing.
+- **DECISION: the Step-3 crank is CLOSED on this net at every reachable
+  sharpness.** The value head is the cap — as predicted since the gen-4
+  REFRAME, and now with external evidence (JTR: gap to POWERFUL halved)
+  that model gains convert to absolute strength. **Next work: Step-4
+  value-head scaling — attention over the 36 card rows replacing mean
+  pooling.**
+- **What re-opens Step 3:** a materially better net. The operator margin is
+  a function of the leaf evaluator, so after the value-head upgrade
+  trains, re-run this exact probe (K=16 arm first — it was the live axis)
+  before deciding whether to crank generations again.

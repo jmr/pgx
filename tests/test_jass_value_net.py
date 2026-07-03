@@ -316,6 +316,16 @@ def test_pv_train_model_smoke():
     assert value.shape == (2,)
 
 
+def test_pv_train_model_optimizer_passthrough():
+    params, model = train_pv_model(optimizer=optax.adamw(3e-4,
+                                                         weight_decay=1e-2),
+                                   batch_size=4, num_epochs=2,
+                                   print_every=100)
+    logits, value = model.apply(params, jnp.zeros((2, 36, 12)),
+                                jnp.zeros((2, 20)))
+    assert logits.shape == (2, 43)
+
+
 def test_pv_train_model_attn(tmp_path):
     """train_pv_model(model=PolicyValueNetAttn()) trains and resumes."""
     ckpt = str(tmp_path / "pv_attn_ckpt.msgpack")

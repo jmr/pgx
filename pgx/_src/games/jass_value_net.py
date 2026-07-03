@@ -588,6 +588,7 @@ def train_pv_model(
     eval_collect_fn=None,
     num_epochs: int = 1000,
     lr: float = 3e-4,
+    optimizer: optax.GradientTransformation = None,
     policy_weight: float = 1.0,
     accum_steps: int = 1,
     data_parallel: bool = False,
@@ -628,7 +629,12 @@ def train_pv_model(
             is data the net trains on.
         batch_size: Number of games per training batch and holdout set.
         num_epochs: Total training epochs.
-        lr: Adam learning rate.
+        lr: Adam learning rate (also accepts an optax schedule). Ignored
+            if optimizer is given.
+        optimizer: Optional optax optimizer replacing the default
+            optax.adam(lr) — e.g. optax.adamw(3e-4, weight_decay=1e-2)
+            for regularization (the gen-6b overfit). ⚠ Checkpoints store
+            the optimizer state: resume with the same optimizer.
         policy_weight: Weight of the policy cross-entropy in the loss
             (value MSE has weight 1).
         accum_steps: Gradient-accumulation microbatches per step (see
@@ -665,7 +671,8 @@ def train_pv_model(
         model = PolicyValueNet()
     key, k0 = jax.random.split(key)
     params = model.init(k0, jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
-    optimizer = optax.adam(lr)
+    if optimizer is None:
+        optimizer = optax.adam(lr)
     opt_state = optimizer.init(params)
     n_dev = jax.local_device_count() if data_parallel else 1
     step_fn = make_pv_train_step(model, optimizer, policy_weight, accum_steps,

@@ -157,8 +157,10 @@ cap. **CHAMPION stays gen-5b (`pv_gen5b_s128.msgpack`).**
   ~5× slower than PolicyValueNet (90 s vs 18 s per 100 epochs → ~5 h for
   20k; measured 2026-07-03, 1×1 + `accum_steps=4` — its 2048-game step
   needs ~33 G HBM vs 15.75 G/chip). On the 2×4, sharding 8× (~9.5k
-  positions ≈ 4 G/chip) makes `accum_steps` unnecessary and should bring
-  20k epochs back under ~1 h. **Preference: run everything on one 2×4
+  positions ≈ 4 G/chip) makes `accum_steps` unnecessary; **measured
+  2026-07-03: 20 s/100 epochs → 20k in ~67 min** (4.5× the 1×1+accum
+  path; not 8× — host-side augment/sharding is serial). A mid-run
+  1×1→2×4 checkpoint handoff worked (resume + `data_parallel=True`). **Preference: run everything on one 2×4
   instance** (no 1×1↔2×4 stop/start); the old 1×1-for-training rule only
   mattered when collection competed for the 2×4.
 - **After the new net trains (and passes its gates):** re-run the operator

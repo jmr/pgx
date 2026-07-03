@@ -114,6 +114,33 @@ def test_pv_card_logits_use_global_context(model_cls):
     assert float(p_loss) < 0.35, f"policy CE stuck at {float(p_loss):.3f}"
 
 
+@pytest.mark.parametrize("n", [64, 30])  # 30: exercises the zero-pad path
+def test_pv_train_step_accum_matches_plain(n):
+    """accum_steps>1 must produce the same losses and updates as plain."""
+    model = PolicyValueNetAttn(num_layers=1)
+    params = model.init(jax.random.PRNGKey(0),
+                        jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
+    # SGD: params move by -lr*grad, so this compares the two paths'
+    # gradients directly. (Adam would amplify float-noise on exactly-zero
+    # gradients — e.g. the card-head output bias, softmax-invariant — to
+    # ±lr updates with implementation-dependent sign.)
+    optimizer = optax.sgd(0.1)
+    opt_state = optimizer.init(params)
+    plain = make_pv_train_step(model, optimizer)
+    accum = make_pv_train_step(model, optimizer, accum_steps=4)
+
+    batch = _synthetic_pv_batch(jax.random.PRNGKey(1), n=n)
+    p_a, o_a, loss_a, v_a, pl_a = plain(params, opt_state, *batch)
+    p_b, o_b, loss_b, v_b, pl_b = accum(params, opt_state, *batch)
+
+    assert jnp.allclose(loss_a, loss_b, rtol=1e-5)
+    assert jnp.allclose(v_a, v_b, rtol=1e-5)
+    assert jnp.allclose(pl_a, pl_b, rtol=1e-5)
+    for x, y in zip(jax.tree_util.tree_leaves(p_a),
+                    jax.tree_util.tree_leaves(p_b)):
+        assert jnp.allclose(x, y, rtol=1e-4, atol=1e-6)
+
+
 def test_pv_train_step_mask_zeroes_padding():
     """Padding steps (mask=0) must not contribute to the loss."""
     model = PolicyValueNet()

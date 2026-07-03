@@ -272,8 +272,20 @@ def make_train_step(model: ValueNet, optimizer: optax.GradientTransformation):
 
 def make_pv_train_step(model: PolicyValueNet,
                        optimizer: optax.GradientTransformation,
-                       policy_weight: float = 1.0):
-    """Return a jit-compiled training step for the joint policy+value net."""
+                       policy_weight: float = 1.0,
+                       accum_steps: int = 1):
+    """Return a jit-compiled training step for the joint policy+value net.
+
+    accum_steps > 1 splits each batch into that many sequential
+    microbatches (lax.scan) and accumulates gradients — the same update
+    as accum_steps=1 (identical math; only float summation order differs)
+    at ~1/accum_steps the activation memory. Use when the step OOMs:
+    PolicyValueNetAttn needs ~33 G HBM for a 2048-game step, ~2× a
+    15.75 G TPU chip — accum_steps=4 fits. The batch is zero-padded (with
+    mask=0, contributing nothing) to a multiple of accum_steps. The
+    accum_steps=1 path is unchanged code, so existing runs and their
+    checkpoint-resume streams are bit-for-bit unaffected.
+    """
 
     @jax.jit
     def train_step(params, opt_state, cm, hd, y, pi, legal, mask):
@@ -310,7 +322,56 @@ def make_pv_train_step(model: PolicyValueNet,
         return (optax.apply_updates(params, updates), new_opt_state,
                 loss, v_loss, p_loss)
 
-    return train_step
+    @jax.jit
+    def train_step_accum(params, opt_state, cm, hd, y, pi, legal, mask):
+        """As train_step, but gradients accumulated over microbatches.
+
+        Per microbatch it differentiates the masked SUM of the losses
+        (linear in the batch, so sums of microbatch gradients are exact),
+        then normalizes gradients and reported losses once by the global
+        mask total — identical to train_step's masked-mean loss.
+        """
+        batch = (cm, hd, y, pi, legal, mask)
+        pad = (-cm.shape[0]) % accum_steps
+        if pad:  # zero rows: mask=0, legal all-False → CE/MSE contribute 0
+            batch = tuple(
+                jnp.pad(a, ((0, pad),) + ((0, 0),) * (a.ndim - 1))
+                for a in batch)
+        batch = tuple(
+            a.reshape((accum_steps, -1) + a.shape[1:]) for a in batch)
+
+        def sum_loss_fn(p, mb):
+            mb_cm, mb_hd, mb_y, mb_pi, mb_legal, mb_mask = mb
+            logits, v = model.apply(p, mb_cm, mb_hd)
+            v_sq = (v - mb_y / TARGET_SCALE) ** 2
+            masked_logits = jnp.where(mb_legal, logits, jnp.float32(-1e9))
+            logp = jax.nn.log_softmax(masked_logits, axis=-1)
+            ce = -(mb_pi * logp).sum(axis=-1)
+            v_sum = (v_sq * mb_mask).sum()
+            p_sum = (ce * mb_mask).sum()
+            return v_sum + policy_weight * p_sum, (v_sum, p_sum)
+
+        grad_fn = jax.value_and_grad(sum_loss_fn, has_aux=True)
+
+        def body(carry, mb):
+            g_acc, v_acc, p_acc = carry
+            (_, (v_sum, p_sum)), g = grad_fn(params, mb)
+            g_acc = jax.tree_util.tree_map(jnp.add, g_acc, g)
+            return (g_acc, v_acc + v_sum, p_acc + p_sum), None
+
+        init = (jax.tree_util.tree_map(jnp.zeros_like, params),
+                jnp.float32(0.0), jnp.float32(0.0))
+        (grads, v_sum, p_sum), _ = jax.lax.scan(body, init, batch)
+
+        denom = mask.sum().clip(1)
+        grads = jax.tree_util.tree_map(lambda g: g / denom, grads)
+        v_loss, p_loss = v_sum / denom, p_sum / denom
+        loss = v_loss + policy_weight * p_loss
+        updates, new_opt_state = optimizer.update(grads, opt_state, params)
+        return (optax.apply_updates(params, updates), new_opt_state,
+                loss, v_loss, p_loss)
+
+    return train_step if accum_steps == 1 else train_step_accum
 
 
 # ── Training ──────────────────────────────────────────────────────────────────
@@ -476,6 +537,7 @@ def train_pv_model(
     num_epochs: int = 1000,
     lr: float = 3e-4,
     policy_weight: float = 1.0,
+    accum_steps: int = 1,
     augment: bool = True,
     print_every: int = 100,
     seed: int = 0,
@@ -516,6 +578,10 @@ def train_pv_model(
         lr: Adam learning rate.
         policy_weight: Weight of the policy cross-entropy in the loss
             (value MSE has weight 1).
+        accum_steps: Gradient-accumulation microbatches per step (see
+            make_pv_train_step) — same update, ~1/accum_steps the
+            activation memory. Also applies to the eval-loss computation
+            (which runs a full grad step on the whole holdout).
         augment: Apply a random suit relabeling to every training sample
             each epoch (cm, hd, pi, and legal together; see
             jass_selfplay.augment_suits). Default True — free data
@@ -541,7 +607,7 @@ def train_pv_model(
     params = model.init(k0, jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
     optimizer = optax.adam(lr)
     opt_state = optimizer.init(params)
-    step_fn = make_pv_train_step(model, optimizer, policy_weight)
+    step_fn = make_pv_train_step(model, optimizer, policy_weight, accum_steps)
 
     start_epoch = 0
     if checkpoint_path is not None:

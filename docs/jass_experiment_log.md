@@ -894,3 +894,36 @@ PolicyValueNet on this corpus and gated flat.
   over the 2×4; 20 s/100 epochs vs 90 s on 1×1+accum; a mid-run
   1×1→2×4 checkpoint handoff worked). Standing preference: one 2×4
   instance for everything while Step 3 is closed.
+
+## 2026-07-03 — gen-6b post-mortem: it's OVERFITTING, not optimization — the "optimization smell" read above is WRONG
+
+Seen-vs-holdout loss decomposition on the saved nets (sgd(0) step as a
+pure loss readout; train[0] = first corpus batch, seen ~1.3k× modulo suit
+augmentation; holdout = the eval batch):
+
+| net | train[0] v | holdout v | train[0] p | holdout p |
+|:--|:--|:--|:--|:--|
+| gen-6b (attn) | **0.0731** | 0.1472 | 0.9536 | 0.9508 |
+| gen-5b | 0.1341 | 0.1337 | 0.9650 | 0.9617 |
+
+- **gen-6b's value head memorizes**: it fits seen data 2× better than the
+  old net fits *anything* (0.073 — far past gen-5b's 0.134) and
+  generalizes worse (0.147). **gen-5b's gap is ZERO** — the old
+  architecture is capacity-saturated, not regularized.
+- So the warmup/lr theory is falsified before being run: optimization is
+  fine (it reached a much deeper train loss), capacity is ample —
+  **regularization is what's missing.** Policy heads are clean on both
+  nets (CE pinned at the soft targets' entropy floor, no overfit).
+- Encouraging reframe of the gen-6b negative: capacity was the right
+  thing to add; it currently converts to memorization instead of
+  generalization. Also anecdotal (record lost to preemptions): eval v
+  may have dipped lower mid-training — a U-curve minimum possibly below
+  the old net's 0.133. The retrain will keep full logs and show it.
+- **Next arm: weight decay** — `train_pv_model(..., 
+  optimizer=optax.adamw(3e-4, weight_decay=1e-2))` (passthrough added
+  2026-07-03), same corpus, full logs kept. Success signal before any
+  arena: holdout v clearly below 0.133 WITHOUT the train[0]-vs-holdout
+  gap re-opening. Escalation if insufficient: dropout in the attention
+  blocks, then num_layers=1 (smaller attn net). Note plain adamw decays
+  LayerNorm/bias params too (usually masked out in transformer recipes)
+  — acceptable for the first arm, revisit if it underperforms.

@@ -134,14 +134,20 @@ cap. **CHAMPION stays gen-5b (`pv_gen5b_s128.msgpack`).**
   entry in the log): gen-6b = `PolicyValueNetAttn` trained on gen-6's
   corpus — eval value loss 0.1476 (old arch: 0.1331, same holdout
   construct), raw gate +2.8 ns, PUCT@64 deployed check +1.0 ns. NOT
-  promoted.** Read: optimization smell, not a capacity verdict (a
-  capacity-superset net converged to a worse loss; flat Adam 3e-4, no
-  warmup). Next arms, in cost order:
-  1. **lr warmup + small lr sweep** on the same corpus (~1 h/arm with
-     `data_parallel=True`): e.g. linear warmup 1k epochs → cosine or
-     constant, lr {1e-4, 3e-4, 1e-3}. Success signal BEFORE any arena:
-     eval value loss clearly below 0.133.
-  2. **Value-only attention variant**: keep the old (cheap, proven)
+  promoted.** Post-mortem (same day, in the log): **OVERFITTING** — the
+  attn value head fits seen data at 0.073 (2× past gen-5b's 0.134
+  saturation) and generalizes at 0.147; gen-5b's seen-vs-holdout gap is
+  zero. Capacity ample, optimization fine, regularization missing. Next
+  arms, in cost order:
+  1. **Weight decay:** retrain with
+     `optimizer=optax.adamw(3e-4, weight_decay=1e-2)` (passthrough
+     landed 2026-07-03), same corpus, KEEP FULL LOGS (the eval-v curve
+     shape is diagnostic — U-curve minimum = early-stopping point).
+     Success signal BEFORE any arena: holdout v clearly below 0.133 with
+     the seen-vs-holdout gap staying closed.
+  2. **Dropout in the attention blocks**, then **num_layers=1** if decay
+     alone doesn't close the gap.
+  3. **Value-only attention variant**: keep the old (cheap, proven)
      policy path, spend the attention capacity on the value head alone —
      the original Step-4 framing.
   - Cell mechanics for any attn arm: `model=PolicyValueNetAttn(...)`,

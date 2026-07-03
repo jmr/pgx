@@ -131,12 +131,32 @@ cap. **CHAMPION stays gen-5b (`pv_gen5b_s128.msgpack`).**
 - **Now:** Step-4 value-head scaling — attention over the 36 card rows
   replacing mean pooling (see jass_plan Step 4). Motivation: JTR says model
   gains convert to absolute strength (gap to POWERFUL halved, −22 →
-  ≈−9.5/game).
-- **After the new net trains:** re-run the operator probe (K=16 arm first —
-  it was the only near-significant axis) to see if the crank restarts; the
+  ≈−9.5/game). **Code landed 2026-07-03: `PolicyValueNetAttn`** (393k
+  params vs 111k). Colab run (**gen-6b** — the architecture arm of gen-6,
+  same corpus, mirroring how gen-5b was the recipe arm of gen-5):
+  - Train from scratch on the existing gen-5b corpus
+    (`corpus_puct_gen5b_16x2048_s128k8.pickle`) — zero collection, clean
+    A/B vs gen-6 which trained PolicyValueNet on this exact corpus and
+    gated flat. Same recipe otherwise: 100% PUCT, 20k epochs,
+    `policy_weight=1.0`, `augment=True`, but
+    `train_pv_model(model=PolicyValueNetAttn(), ...)` and NEW paths:
+    `pv_gen6b_s128_ckpt.msgpack` / `pv_gen6b_s128.msgpack`. ⚠ Never
+    restore a PolicyValueNet file into the attn net (template trap);
+    fingerprint as usual. Attn forward is ~6.5× on CPU — re-time one
+    training step before assuming the 1 h Stage-2 budget holds.
+  - Gates, in order: (1) raw vs gen-5b raw, τ=0.05, 300 pairs × seeds
+    0/2 — did architecture alone convert the corpus gen-6 couldn't?
+    (2) PUCT@64 vs gen-5b PUCT@64 deployed check — the value head is the
+    whole point; unlike the policy climbs this one should MOVE if the
+    upgrade works. (3) Eval value loss vs the 0.13–0.14 band for
+    reference only.
+- **After the new net trains (and passes its gates):** re-run the operator
+  probe on the NEW net (gen-6b PUCT vs gen-6b raw; K=16 arm first — it was
+  the only near-significant axis) to see if the crank restarts; the
   operator margin is a function of the leaf evaluator. Only then decide on
   a gen-7 collection (which would be K=16: re-profile per-chip optimum,
-  B×K≈512 → ~32/chip, ~2× Stage-1 wall-clock).
+  B×K≈512 → ~32/chip, ~2× Stage-1 wall-clock — and the attn net's own
+  cost multiplies in; re-profile, don't assume).
 - Optional cheap confirmation of the exhaustion story: gen-6 top-1 adoption
   on the held-out batch (prediction: high teacher agreement, correction
   share well below gen-4's 36.6%).

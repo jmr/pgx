@@ -453,6 +453,15 @@ Levers, **REORDERED by the measurement** (batch-fix first, then chips):
 
 - Net scaling: attention over the 36 card rows is the natural upgrade from
   mean pooling; then width/depth, more simulations, larger batches.
+  **Code DONE 2026-07-03:** `PolicyValueNetAttn` in `jass_value_net.py`
+  (header broadcast into each row, 2 pre-LN self-attention blocks over the
+  36 rows, learned-query attention pool replacing the mean; 393k params vs
+  111k, ~6.5× CPU forward at B=512 — expect slower collection if it wins).
+  Train via `train_pv_model(model=PolicyValueNetAttn(), ...)`; ⚠ checkpoints
+  and weight files are architecture-specific — NEW filenames, and never
+  restore PolicyValueNet weights into it (flax from_bytes silently mangles
+  params restored against the wrong template). Training/gating plan → jass_sop.md
+  "Current strategic state".
 - **Cross-engine arena vs JassTheRipper.** It has a server/arena setup
   (`compare-strengths-arena.sh`, jass-server protocol — see its README and
   `JassInterface.pdf`). Build a thin bridge so the pgx agent can play it.

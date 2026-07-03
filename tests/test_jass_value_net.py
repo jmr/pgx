@@ -3,13 +3,18 @@ import os
 import jax
 import jax.numpy as jnp
 import optax
+import pytest
 
 from pgx._src.games.jass_value_net import (
     PolicyValueNet,
+    PolicyValueNetAttn,
     make_pv_train_step,
     train_model,
     train_pv_model,
 )
+
+# Both classes share the (cm, hd) → (logits, value) contract.
+PV_MODELS = [PolicyValueNet, PolicyValueNetAttn]
 
 
 def _params_equal(a, b):
@@ -18,8 +23,9 @@ def _params_equal(a, b):
                                jax.tree_util.tree_leaves(b)))
 
 
-def test_pv_net_shapes():
-    model = PolicyValueNet()
+@pytest.mark.parametrize("model_cls", PV_MODELS)
+def test_pv_net_shapes(model_cls):
+    model = model_cls()
     params = model.init(jax.random.PRNGKey(0),
                         jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
     cm = jnp.zeros((5, 36, 12), dtype=jnp.bool_)
@@ -45,8 +51,9 @@ def _synthetic_pv_batch(key, n=64):
     return cm, hd, y, pi, legal, mask
 
 
-def test_pv_train_step_learns():
-    model = PolicyValueNet()
+@pytest.mark.parametrize("model_cls", PV_MODELS)
+def test_pv_train_step_learns(model_cls):
+    model = model_cls()
     params = model.init(jax.random.PRNGKey(0),
                         jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
     optimizer = optax.adam(3e-3)
@@ -64,14 +71,16 @@ def test_pv_train_step_learns():
     assert float(loss) < float(loss0)
 
 
-def test_pv_card_logits_use_global_context():
+@pytest.mark.parametrize("model_cls", PV_MODELS)
+def test_pv_card_logits_use_global_context(model_cls):
     """Card logits must see global context, not just their own card's row.
 
     Target: the FIRST held card when header bit 0 is set, else the LAST
     held card. Per-row-only card logits (the Step 2 run 2 architecture)
     provably cannot separate these — both targets look identical from the
     single card's features — and stall at CE ≈ ln 2. With pooled context
-    fed back into the card head this is learnable to near zero.
+    fed back into the card head (PolicyValueNet) or self-attention over
+    the rows (PolicyValueNetAttn) this is learnable to near zero.
     """
     k1, k2 = jax.random.split(jax.random.PRNGKey(0))
     n = 256
@@ -91,7 +100,7 @@ def test_pv_card_logits_use_global_context():
     y = jnp.zeros(n)
     mask = jnp.ones(n)
 
-    model = PolicyValueNet()
+    model = model_cls()
     params = model.init(jax.random.PRNGKey(1),
                         jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
     optimizer = optax.adam(3e-3)
@@ -165,6 +174,28 @@ def test_pv_train_model_smoke():
     logits, value = model.apply(params, jnp.zeros((2, 36, 12)), jnp.zeros((2, 20)))
     assert logits.shape == (2, 43)
     assert value.shape == (2,)
+
+
+def test_pv_train_model_attn(tmp_path):
+    """train_pv_model(model=PolicyValueNetAttn()) trains and resumes."""
+    ckpt = str(tmp_path / "pv_attn_ckpt.msgpack")
+
+    p_full, model = train_pv_model(model=PolicyValueNetAttn(),
+                                   batch_size=4, num_epochs=4, print_every=100)
+    assert isinstance(model, PolicyValueNetAttn)
+    logits, value = model.apply(p_full, jnp.zeros((2, 36, 12)),
+                                jnp.zeros((2, 20)))
+    assert logits.shape == (2, 43)
+    assert value.shape == (2,)
+
+    # Checkpoint resume must replay to the same weights (the checkpoint
+    # template comes from the passed model, not the default architecture).
+    train_pv_model(model=PolicyValueNetAttn(), batch_size=4, num_epochs=2,
+                   print_every=100, checkpoint_path=ckpt, checkpoint_every=2)
+    p_resumed, _ = train_pv_model(model=PolicyValueNetAttn(), batch_size=4,
+                                  num_epochs=4, print_every=100,
+                                  checkpoint_path=ckpt, checkpoint_every=2)
+    assert _params_equal(p_full, p_resumed)
 
 
 def test_pv_train_model_round_robins_collect_fns():

@@ -9,6 +9,11 @@ PolicyValueNet (docs/jass_plan.md Step 2): same per-card trunk, plus
 - trump logits (7): actions 36–42, from pooled features + header;
 - value head structurally identical to ValueNet's.
 
+PolicyValueNetAttn (docs/jass_plan.md Step 4): self-attention over the 36
+card rows + learned-query attention pooling replacing the row-shared trunk
+and mean pool. Same (cm, hd) → (logits, value) contract; pass
+``model=PolicyValueNetAttn()`` to train_pv_model.
+
 Usage:
     model = ValueNet()
     params = model.init(key, jnp.zeros((B, 36, 12)), jnp.zeros((B, 20)))
@@ -152,6 +157,88 @@ class PolicyValueNet(nn.Module):
         trump_logits = nn.Dense(NUM_ACTIONS - 36)(t)  # (B, 7)
 
         logits = jnp.concatenate([card_logits, trump_logits], axis=-1)  # (B, 43)
+        return logits, value
+
+
+class PolicyValueNetAttn(nn.Module):
+    """PolicyValueNet with self-attention over the 36 card rows (Step 4).
+
+    Motivation (docs/jass_plan.md Step 4, decision of 2026-07-03): the
+    mean-pooled value head is the deployed-strength cap — no search axis
+    re-opens the improvement operator on PolicyValueNet, and the pooled
+    summary is where the value path loses card-interaction information
+    (mean pooling cannot represent "my Jack beats their nine" relations).
+
+    Same interface and feature encoding as PolicyValueNet (card identity
+    appended inside the module; logits unmasked). Differences:
+
+    - The 20-bit header is broadcast into every card row at embedding
+      time, so attention weights can depend on trump mode / trick context
+      (in PolicyValueNet the header only enters after pooling).
+    - ``num_layers`` pre-LN transformer blocks (multi-head self-attention
+      + gelu MLP, residual) let card rows interact before any pooling.
+    - The pooled summary is a learned-query attention pool over the rows
+      instead of a mean.
+    - Card logits read directly off the attended rows — the explicit
+      global-context concat of PolicyValueNet is subsumed by attention
+      (verified by the same context test).
+    """
+    hidden: int = 128
+    num_heads: int = 4
+    num_layers: int = 2
+
+    @nn.compact
+    def __call__(self, cm: jnp.ndarray, hd: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """
+        Args:
+            cm: (B, 36, 12) bool  card matrix
+            hd: (B, 20)     bool  header
+
+        Returns:
+            logits: (B, 43) float32  unmasked action logits
+            value : (B,)    float32  predicted differential / TARGET_SCALE
+        """
+        x = cm.astype(jnp.float32)                     # (B, 36, 12)
+        ident = jnp.broadcast_to(_CARD_IDENTITY, x.shape[:-1] + (13,))
+        h = hd.astype(jnp.float32)                     # (B, 20)
+        h_rows = jnp.broadcast_to(h[..., None, :], x.shape[:-1] + (20,))
+        x = jnp.concatenate([x, ident, h_rows], axis=-1)   # (B, 36, 45)
+
+        x = nn.Dense(self.hidden)(x)                   # (B, 36, hidden)
+
+        for _ in range(self.num_layers):
+            y = nn.LayerNorm()(x)
+            y = nn.MultiHeadDotProductAttention(num_heads=self.num_heads)(y)
+            x = x + y
+            y = nn.LayerNorm()(x)
+            y = nn.Dense(2 * self.hidden)(y)
+            y = nn.gelu(y)
+            y = nn.Dense(self.hidden)(y)
+            x = x + y
+
+        rows = nn.LayerNorm()(x)                       # (B, 36, hidden)
+
+        # Learned-query attention pool over the card rows (replaces mean).
+        q = self.param("pool_query", nn.initializers.normal(0.02),
+                       (1, self.hidden))
+        q = jnp.broadcast_to(q, x.shape[:-2] + (1, self.hidden))
+        pooled = nn.MultiHeadDotProductAttention(num_heads=self.num_heads)(
+            q, rows).squeeze(-2)                       # (B, hidden)
+
+        y = jnp.concatenate([pooled, h], axis=-1)      # (B, hidden + 20)
+
+        c = nn.gelu(nn.Dense(self.hidden)(rows))       # (B, 36, hidden)
+        card_logits = nn.Dense(1)(c).squeeze(-1)       # (B, 36)
+
+        v = nn.Dense(self.hidden)(y)
+        v = nn.gelu(v)
+        value = nn.Dense(1)(v).squeeze(-1)             # (B,)
+
+        t = nn.Dense(self.hidden)(y)
+        t = nn.gelu(t)
+        trump_logits = nn.Dense(NUM_ACTIONS - 36)(t)   # (B, 7)
+
+        logits = jnp.concatenate([card_logits, trump_logits], axis=-1)
         return logits, value
 
 
@@ -382,6 +469,7 @@ def _flatten_pv(batch):
 
 def train_pv_model(
     *,
+    model: nn.Module = None,
     collect_fn=None,
     batch_size: int = 8192,
     eval_collect_fn=None,
@@ -401,6 +489,13 @@ def train_pv_model(
     but for the joint net with the PV collect contract.
 
     Args:
+        model: The net to train — any module with the (cm, hd) →
+            (logits, value) contract. Defaults to PolicyValueNet();
+            pass PolicyValueNetAttn() for the Step 4 architecture.
+            ⚠ checkpoint_path files are architecture-specific: resuming
+            with a different model than wrote the checkpoint fails (or
+            worse, silently mangles params) — one checkpoint file per
+            (generation, architecture).
         collect_fn: Data generator with the PV contract: (key, batch_size)
             → (cm, hd, labels, pi, legal, alive); e.g.
             jass_selfplay.make_search_collect_fn(...) for Step 2 data.
@@ -432,8 +527,7 @@ def train_pv_model(
         checkpoint_every: Checkpoint interval in epochs.
 
     Returns:
-        (params, model) — trained Flax parameters and the PolicyValueNet
-        instance.
+        (params, model) — trained Flax parameters and the model instance.
     """
     if collect_fn is None:
         collect_fn = collect_pv_batch
@@ -441,7 +535,8 @@ def train_pv_model(
                    if isinstance(collect_fn, (list, tuple)) else (collect_fn,))
     key = jax.random.PRNGKey(seed)
 
-    model = PolicyValueNet()
+    if model is None:
+        model = PolicyValueNet()
     key, k0 = jax.random.split(key)
     params = model.init(k0, jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
     optimizer = optax.adam(lr)

@@ -138,25 +138,38 @@ TWO model instances.
   `data_parallel=True`. Training-health check for attn: eval v ≈
   0.115 ± 0.002 at 7k (the old 0.13–0.14 band is the *old architecture's*
   level).
-- **Now: operator re-probe on gen-6b_es** (pre-registered): its PUCT vs
-  its own raw, K=16 arm first, then @128 K=8; τ=0.05, seed-looped chunks
-  (80×3 / 20×12 for K·sims 8·128 / 16·128 — and the attn net's bigger
-  working set may need smaller chunks; if a chunk hangs, halve it). The
-  gen-5b baseline was +3.0/+3.8 ns; a jump off ~0 restarts Step 3 →
-  gen-7 collected by gen-6b_es.
-- **Queued arms:**
-  1. **Weight decay** (`optimizer=optax.adamw(3e-4, weight_decay=1e-2)`,
-     passthrough landed 2026-07-03): hold ~0.115 at full convergence so
-     future generations don't need hand-picked stopping epochs. Success:
-     holdout v ≤ 0.115 at 20k with the seen-vs-holdout gap closed.
-  2. **Dropout in the attention blocks** / `num_layers=1` if decay
-     can't close the gap.
-- **Before gen-7 Stage 1:** re-profile the per-chip collect optimum with
-  the attn generator (`profile_collect_fn` on 1×1) — the B×K≈512 rule
-  was profiled with the old net and the attn forward is ~6.5× (CPU,
-  B=512). **Before the next JTR calibration:** the export scripts
-  (`extract_pv_weights.py` / `export_pv_savedmodel.py`) hardcode
-  `PolicyValueNet()` — they need attn support.
+**OWED gen-6b_es measurements (next colab session, in order):**
+
+1. **Operator re-probe** (pre-registered; CPU runtime suffices): gen-6b_es
+   PUCT vs its own raw (both `attn_model.apply`), K=16 @128 arm first,
+   then K=8 @128; τ=0.05, seed-looped chunks (80×3 / 20×12 for K·sims
+   8·128 / 16·128 — the attn net's bigger working set may need smaller
+   chunks; if a chunk hangs, halve it). gen-5b baseline was +3.0/+3.8 ns;
+   a jump off ~0 = policy fuel is back → gen-7 policy targets are worth
+   collecting sharp.
+2. **Collect re-profile** (`profile_collect_fn`, 1×1, attn generator) —
+   the B×K≈512 VMEM optimum was profiled with the OLD net (attn forward
+   ~6.5× on CPU). This prices Stage 1 and decides the gen-7 corpus size
+   (below).
+3. Optional: top-1 adoption diagnostics (gen-6b_es and gen-6 vs the
+   teacher, held-out batch); JTR calibration of gen-6b_es — blocked on
+   attn support in the export scripts (they hardcode `PolicyValueNet()`).
+
+**gen-7 DECISION (2026-07-03): collect a LARGER corpus — the principled
+fix for the attn overfit, replacing early stopping.** Overfit onset was
+~8k epochs ≈ ~530 passes over each of the 15 train batches; doubling to
+**32 batches × 2048 = 64k games** halves passes-per-epoch and feeds the
+spare capacity — and the value head benefits from more games regardless
+of the operator margin (value targets are game outcomes, not
+search-dependent). Train the attn net full-length on it, full logs: if
+the U-curve minimum moves past 20k, early stopping retires. Per-epoch
+training cost is unchanged (one batch per step); only Stage-1 cost
+scales — hence the re-profile first. Do NOT pad with older generations'
+corpora (the gen-2 3-way-mix regression). Fallback arms if a big corpus
+still overfits: weight decay
+(`optimizer=optax.adamw(3e-4, weight_decay=1e-2)`, passthrough landed
+2026-07-03; success = holdout v ≤ 0.115 at 20k with the gap closed),
+then dropout in the attention blocks / `num_layers=1`.
 - **Training on the 2×4: `train_pv_model(..., data_parallel=True)`**
   (landed 2026-07-03) — pmaps the train step over all local chips
   (batches sharded, grads psum'd; same update math, checkpoints stay

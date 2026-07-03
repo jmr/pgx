@@ -29,13 +29,15 @@ in the experiment log, 2026-07-03 entries.
 
 **NEXT: (1) operator re-probe on gen-6b_es** (PUCT vs own raw, K=16 arm
 first — pre-registered by the sharpening-probe DECISION; a jump off ~0
-restarts the Step-3 crank → gen-7); **(2) weight-decay arm**
-(`optimizer=optax.adamw(...)`) to hold ~0.115 at convergence without
-hand-picked stopping epochs; **(3) before gen-7 Stage 1:** re-profile the
-per-chip collect optimum for the attn net (~6.5× forward) and add attn
-support to the JTR export scripts (they hardcode `PolicyValueNet()`).
+means gen-7's policy targets are worth collecting sharp); **(2) gen-7
+with a LARGER corpus (64k games, 2026-07-03 DECISION)** — the principled
+fix for the attn overfit, replacing early stopping; re-profile the
+per-chip collect optimum first (attn generator, ~6.5× forward).
+Weight decay / dropout are fallback arms if a big corpus still overfits.
+Also owed: attn support in the JTR export scripts (they hardcode
+`PolicyValueNet()`), then a gen-6b_es POWERFUL calibration.
 Training now runs on the 2×4 (`data_parallel=True`, ~20 s/100 epochs →
-7k in ~25 min).
+7k in ~25 min). Owed-measurement details → jass_sop.md.
 
 ## Previous snapshot (2026-07-02)
 

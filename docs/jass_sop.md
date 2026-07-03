@@ -150,6 +150,14 @@ cap. **CHAMPION stays gen-5b (`pv_gen5b_s128.msgpack`).**
     whole point; unlike the policy climbs this one should MOVE if the
     upgrade works. (3) Eval value loss vs the 0.13–0.14 band for
     reference only.
+- **Queued if gen-6b wins:** pmap data-parallel training on the 2×4.
+  PolicyValueNetAttn trains ~5× slower than PolicyValueNet (90 s vs 18 s
+  per 100 epochs → ~5 h for 20k; measured 2026-07-03, 1×1 +
+  `accum_steps=4` — the 2048-game step needs ~33 G HBM vs 15.75 G).
+  Sharding the step over 8 chips (~9.5k positions/chip ≈ 4 G) removes the
+  accumulation scan AND parallelizes ≈8× → back to well under 1 h. The
+  1×1-for-training rule doesn't bind while Step 3 is closed (no
+  collection competing for the 2×4).
 - **After the new net trains (and passes its gates):** re-run the operator
   probe on the NEW net (gen-6b PUCT vs gen-6b raw; K=16 arm first — it was
   the only near-significant axis) to see if the crank restarts; the

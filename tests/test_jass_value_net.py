@@ -8,6 +8,8 @@ import pytest
 from pgx._src.games.jass_value_net import (
     PolicyValueNet,
     PolicyValueNetAttn,
+    _replicate,
+    _shard_pv,
     make_pv_train_step,
     train_model,
     train_pv_model,
@@ -139,6 +141,117 @@ def test_pv_train_step_accum_matches_plain(n):
     for x, y in zip(jax.tree_util.tree_leaves(p_a),
                     jax.tree_util.tree_leaves(p_b)):
         assert jnp.allclose(x, y, rtol=1e-4, atol=1e-6)
+
+
+def test_pv_train_step_pmap_matches_plain():
+    """The pmap'd step must produce the same update as the plain step.
+
+    Runs on however many local devices exist (1 on CPU here — the psum /
+    shard / replicate plumbing is still exercised; the multi-device case
+    is covered by the subprocess test below).
+    """
+    model = PolicyValueNetAttn(num_layers=1)
+    params = model.init(jax.random.PRNGKey(0),
+                        jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
+    optimizer = optax.sgd(0.1)  # linear in grads — see the accum test
+    opt_state = optimizer.init(params)
+    plain = make_pv_train_step(model, optimizer)
+    pstep = make_pv_train_step(model, optimizer, pmap_axis="dp")
+
+    n_dev = jax.local_device_count()
+    batch = _synthetic_pv_batch(jax.random.PRNGKey(1), n=64)
+    r_params, r_opt = _replicate((params, opt_state), n_dev)
+
+    p_a, _, loss_a, v_a, pl_a = plain(params, opt_state, *batch)
+    p_b, _, loss_b, v_b, pl_b = pstep(r_params, r_opt,
+                                      *_shard_pv(batch, n_dev))
+
+    assert jnp.allclose(loss_a, loss_b[0], rtol=1e-5)
+    assert jnp.allclose(v_a, v_b[0], rtol=1e-5)
+    assert jnp.allclose(pl_a, pl_b[0], rtol=1e-5)
+    for x, y in zip(jax.tree_util.tree_leaves(p_a),
+                    jax.tree_util.tree_leaves(p_b)):
+        assert jnp.allclose(x, y[0], rtol=1e-4, atol=1e-6)
+        # params must stay replicated: every device applied the same update
+        assert all(jnp.array_equal(y[0], y[d]) for d in range(n_dev))
+
+
+def test_pv_data_parallel_multi_device():
+    """Real multi-device equivalence + train_pv_model(data_parallel=True).
+
+    XLA's device count is fixed at backend init, so a fresh interpreter
+    with --xla_force_host_platform_device_count is the only way to get
+    multiple devices on CPU.
+    """
+    import subprocess
+    import sys
+    import tempfile
+    import textwrap
+
+    code = textwrap.dedent("""
+        import os
+        os.environ["XLA_FLAGS"] = ("--xla_force_host_platform_device_count=4 "
+                                   + os.environ.get("XLA_FLAGS", ""))
+        os.environ["JAX_PLATFORMS"] = "cpu"
+        import sys
+        import jax
+        import jax.numpy as jnp
+        import optax
+        from pgx._src.games.jass_value_net import (
+            PolicyValueNetAttn, _replicate, _shard_pv,
+            make_pv_train_step, train_pv_model)
+
+        assert jax.local_device_count() == 4
+
+        # 1) step equivalence across 4 devices (incl. pad: 30 % 4 != 0)
+        k1, k2, k3 = jax.random.split(jax.random.PRNGKey(1), 3)
+        n = 30
+        cm = jax.random.bernoulli(k1, 0.2, (n, 36, 12))
+        hd = jax.random.bernoulli(k2, 0.3, (n, 20))
+        legal = jnp.zeros((n, 43), dtype=jnp.bool_).at[:, :36].set(True)
+        pi = jax.nn.one_hot(cm[:, :, 0].argmax(axis=-1), 43)
+        y = jax.random.uniform(k3, (n,), minval=-157, maxval=157)
+        batch = (cm, hd, y, pi, legal, jnp.ones(n, jnp.float32))
+
+        model = PolicyValueNetAttn(num_layers=1)
+        params = model.init(jax.random.PRNGKey(0),
+                            jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
+        optimizer = optax.sgd(0.1)
+        opt_state = optimizer.init(params)
+        plain = make_pv_train_step(model, optimizer)
+        pstep = make_pv_train_step(model, optimizer, pmap_axis="dp")
+        r_params, r_opt = _replicate((params, opt_state), 4)
+
+        p_a, _, loss_a, _, _ = plain(params, opt_state, *batch)
+        p_b, _, loss_b, _, _ = pstep(r_params, r_opt, *_shard_pv(batch, 4))
+        assert jnp.allclose(loss_a, loss_b[0], rtol=1e-5)
+        for x, ys in zip(jax.tree_util.tree_leaves(p_a),
+                         jax.tree_util.tree_leaves(p_b)):
+            assert jnp.allclose(x, ys[0], rtol=1e-4, atol=1e-6)
+
+        # 2) train_pv_model(data_parallel=True): runs, resumes, and its
+        # checkpoints are single-device (loadable by a plain run).
+        ckpt = sys.argv[1] + "/pv_dp_ckpt.msgpack"
+        p_full, _ = train_pv_model(data_parallel=True, batch_size=4,
+                                   num_epochs=4, print_every=100)
+        train_pv_model(data_parallel=True, batch_size=4, num_epochs=2,
+                       print_every=100, checkpoint_path=ckpt,
+                       checkpoint_every=2)
+        p_res, _ = train_pv_model(data_parallel=True, batch_size=4,
+                                  num_epochs=4, print_every=100,
+                                  checkpoint_path=ckpt, checkpoint_every=2)
+        for x, y in zip(jax.tree_util.tree_leaves(p_full),
+                        jax.tree_util.tree_leaves(p_res)):
+            assert jnp.array_equal(x, y)
+        assert jax.tree_util.tree_leaves(p_full)[0].ndim <= 2  # unreplicated
+
+        print("MULTI_DEVICE_OK")
+    """)
+    with tempfile.TemporaryDirectory() as tmp:
+        r = subprocess.run([sys.executable, "-c", code, tmp],
+                           capture_output=True, text=True, timeout=600)
+    assert r.returncode == 0, f"stderr:\n{r.stderr[-3000:]}"
+    assert "MULTI_DEVICE_OK" in r.stdout
 
 
 def test_pv_train_step_mask_zeroes_padding():

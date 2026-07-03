@@ -273,7 +273,8 @@ def make_train_step(model: ValueNet, optimizer: optax.GradientTransformation):
 def make_pv_train_step(model: PolicyValueNet,
                        optimizer: optax.GradientTransformation,
                        policy_weight: float = 1.0,
-                       accum_steps: int = 1):
+                       accum_steps: int = 1,
+                       pmap_axis: str = None):
     """Return a jit-compiled training step for the joint policy+value net.
 
     accum_steps > 1 splits each batch into that many sequential
@@ -283,8 +284,17 @@ def make_pv_train_step(model: PolicyValueNet,
     PolicyValueNetAttn needs ~33 G HBM for a 2048-game step, ~2× a
     15.75 G TPU chip — accum_steps=4 fits. The batch is zero-padded (with
     mask=0, contributing nothing) to a multiple of accum_steps. The
-    accum_steps=1 path is unchanged code, so existing runs and their
-    checkpoint-resume streams are bit-for-bit unaffected.
+    accum_steps=1, pmap_axis=None path is unchanged code, so existing
+    runs and their checkpoint-resume streams are bit-for-bit unaffected.
+
+    pmap_axis (a string axis name) instead returns a jax.pmap'd step:
+    params/opt_state replicated across local devices, batch arguments
+    carrying a leading device axis (see _shard_pv), gradients psum'd —
+    again the same global update, computed data-parallel. Every device
+    applies the identical update, so params stay replicated; returned
+    losses are likewise replicated (read index [0]). accum_steps then
+    applies per shard (rarely needed: sharding 8-ways already cuts
+    activation memory 8×).
     """
 
     @jax.jit
@@ -322,36 +332,34 @@ def make_pv_train_step(model: PolicyValueNet,
         return (optax.apply_updates(params, updates), new_opt_state,
                 loss, v_loss, p_loss)
 
-    @jax.jit
-    def train_step_accum(params, opt_state, cm, hd, y, pi, legal, mask):
-        """As train_step, but gradients accumulated over microbatches.
+    def sum_loss_fn(p, mb):
+        """Masked SUM of the losses (linear in the batch, so microbatch /
+        per-device gradients add exactly); normalize by the global mask
+        total afterwards to recover train_step's masked-mean loss."""
+        mb_cm, mb_hd, mb_y, mb_pi, mb_legal, mb_mask = mb
+        logits, v = model.apply(p, mb_cm, mb_hd)
+        v_sq = (v - mb_y / TARGET_SCALE) ** 2
+        masked_logits = jnp.where(mb_legal, logits, jnp.float32(-1e9))
+        logp = jax.nn.log_softmax(masked_logits, axis=-1)
+        ce = -(mb_pi * logp).sum(axis=-1)
+        v_sum = (v_sq * mb_mask).sum()
+        p_sum = (ce * mb_mask).sum()
+        return v_sum + policy_weight * p_sum, (v_sum, p_sum)
 
-        Per microbatch it differentiates the masked SUM of the losses
-        (linear in the batch, so sums of microbatch gradients are exact),
-        then normalizes gradients and reported losses once by the global
-        mask total — identical to train_step's masked-mean loss.
-        """
-        batch = (cm, hd, y, pi, legal, mask)
-        pad = (-cm.shape[0]) % accum_steps
+    grad_fn = jax.value_and_grad(sum_loss_fn, has_aux=True)
+
+    def sum_grads(params, batch):
+        """Sum-loss grads and (v_sum, p_sum), accumulated if accum_steps>1."""
+        if accum_steps == 1:
+            (_, sums), grads = grad_fn(params, batch)
+            return grads, sums
+        pad = (-batch[0].shape[0]) % accum_steps
         if pad:  # zero rows: mask=0, legal all-False → CE/MSE contribute 0
             batch = tuple(
                 jnp.pad(a, ((0, pad),) + ((0, 0),) * (a.ndim - 1))
                 for a in batch)
         batch = tuple(
             a.reshape((accum_steps, -1) + a.shape[1:]) for a in batch)
-
-        def sum_loss_fn(p, mb):
-            mb_cm, mb_hd, mb_y, mb_pi, mb_legal, mb_mask = mb
-            logits, v = model.apply(p, mb_cm, mb_hd)
-            v_sq = (v - mb_y / TARGET_SCALE) ** 2
-            masked_logits = jnp.where(mb_legal, logits, jnp.float32(-1e9))
-            logp = jax.nn.log_softmax(masked_logits, axis=-1)
-            ce = -(mb_pi * logp).sum(axis=-1)
-            v_sum = (v_sq * mb_mask).sum()
-            p_sum = (ce * mb_mask).sum()
-            return v_sum + policy_weight * p_sum, (v_sum, p_sum)
-
-        grad_fn = jax.value_and_grad(sum_loss_fn, has_aux=True)
 
         def body(carry, mb):
             g_acc, v_acc, p_acc = carry
@@ -362,8 +370,10 @@ def make_pv_train_step(model: PolicyValueNet,
         init = (jax.tree_util.tree_map(jnp.zeros_like, params),
                 jnp.float32(0.0), jnp.float32(0.0))
         (grads, v_sum, p_sum), _ = jax.lax.scan(body, init, batch)
+        return grads, (v_sum, p_sum)
 
-        denom = mask.sum().clip(1)
+    def apply_from_sums(params, opt_state, grads, v_sum, p_sum, denom):
+        denom = denom.clip(1)
         grads = jax.tree_util.tree_map(lambda g: g / denom, grads)
         v_loss, p_loss = v_sum / denom, p_sum / denom
         loss = v_loss + policy_weight * p_loss
@@ -371,6 +381,22 @@ def make_pv_train_step(model: PolicyValueNet,
         return (optax.apply_updates(params, updates), new_opt_state,
                 loss, v_loss, p_loss)
 
+    @jax.jit
+    def train_step_accum(params, opt_state, cm, hd, y, pi, legal, mask):
+        grads, (v_sum, p_sum) = sum_grads(
+            params, (cm, hd, y, pi, legal, mask))
+        return apply_from_sums(params, opt_state, grads, v_sum, p_sum,
+                               mask.sum())
+
+    def train_step_pmap(params, opt_state, cm, hd, y, pi, legal, mask):
+        grads, (v_sum, p_sum) = sum_grads(
+            params, (cm, hd, y, pi, legal, mask))
+        grads, v_sum, p_sum, denom = jax.lax.psum(
+            (grads, v_sum, p_sum, mask.sum()), pmap_axis)
+        return apply_from_sums(params, opt_state, grads, v_sum, p_sum, denom)
+
+    if pmap_axis is not None:
+        return jax.pmap(train_step_pmap, axis_name=pmap_axis)
     return train_step if accum_steps == 1 else train_step_accum
 
 
@@ -528,6 +554,32 @@ def _flatten_pv(batch):
             alive.reshape(-1).astype(jnp.float32))
 
 
+def _replicate(tree, n_dev):
+    """Stack each leaf n_dev times (pmap's replicated-input convention).
+
+    jax.device_put_replicated is removed in jax >= 0.10; a host-side
+    stack is equivalent here — pmap shards it across devices on first
+    call, and afterwards params/opt_state stay device-resident as pmap
+    outputs.
+    """
+    return jax.tree_util.tree_map(
+        lambda x: jnp.stack([x] * n_dev), tree)
+
+
+def _shard_pv(batch, n_dev):
+    """Add a leading device axis to a flattened PV batch for pmap.
+
+    Zero-pads to a multiple of n_dev — padded rows have mask=0 and
+    all-False legal masks, contributing nothing to losses or grads.
+    """
+    def shard(a):
+        pad = (-a.shape[0]) % n_dev
+        if pad:
+            a = jnp.pad(a, ((0, pad),) + ((0, 0),) * (a.ndim - 1))
+        return a.reshape((n_dev, -1) + a.shape[1:])
+    return tuple(shard(a) for a in batch)
+
+
 def train_pv_model(
     *,
     model: nn.Module = None,
@@ -538,6 +590,7 @@ def train_pv_model(
     lr: float = 3e-4,
     policy_weight: float = 1.0,
     accum_steps: int = 1,
+    data_parallel: bool = False,
     augment: bool = True,
     print_every: int = 100,
     seed: int = 0,
@@ -582,6 +635,13 @@ def train_pv_model(
             make_pv_train_step) — same update, ~1/accum_steps the
             activation memory. Also applies to the eval-loss computation
             (which runs a full grad step on the whole holdout).
+        data_parallel: pmap the train step over all local devices (e.g.
+            the 8 chips of a TPU 2×4): batches are sharded per step,
+            gradients psum'd — the same update as single-device, ~n_dev×
+            faster and 1/n_dev the per-chip activation memory (so
+            accum_steps is usually unnecessary with it). Checkpoints
+            stay single-device (interchangeable with data_parallel=False
+            runs). Harmless on one device.
         augment: Apply a random suit relabeling to every training sample
             each epoch (cm, hd, pi, and legal together; see
             jass_selfplay.augment_suits). Default True — free data
@@ -607,7 +667,14 @@ def train_pv_model(
     params = model.init(k0, jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
     optimizer = optax.adam(lr)
     opt_state = optimizer.init(params)
-    step_fn = make_pv_train_step(model, optimizer, policy_weight, accum_steps)
+    n_dev = jax.local_device_count() if data_parallel else 1
+    step_fn = make_pv_train_step(model, optimizer, policy_weight, accum_steps,
+                                 pmap_axis="dp" if data_parallel else None)
+    # Checkpoints and returned params are always single-device; replication
+    # is an internal detail of the data_parallel run.
+    unrep = ((lambda t: jax.tree_util.tree_map(lambda x: x[0], t))
+             if data_parallel else (lambda t: t))
+    scalar = (lambda x: float(x[0])) if data_parallel else float
 
     start_epoch = 0
     if checkpoint_path is not None:
@@ -616,11 +683,17 @@ def train_pv_model(
             params, opt_state, start_epoch = loaded
             print(f"Resuming from {checkpoint_path} at epoch {start_epoch}\n")
 
+    if data_parallel:
+        print(f"Data-parallel over {n_dev} devices")
+        params, opt_state = _replicate((params, opt_state), n_dev)
+
     print("Collecting holdout batch for eval ...")
     key, k_eval = jax.random.split(key)
     eval_fn = eval_collect_fn if eval_collect_fn is not None else collect_fns[0]
     eval_batch = _flatten_pv(eval_fn(k_eval, batch_size))
     print(f"  {int(eval_batch[-1].sum())} labeled positions\n")
+    if data_parallel:
+        eval_batch = _shard_pv(eval_batch, n_dev)
 
     t0 = time.perf_counter()
     for epoch in range(num_epochs):
@@ -634,22 +707,26 @@ def train_pv_model(
         cm, hd, y, pi, legal, mask = _flatten_pv(epoch_collect(k1, batch_size))
         if augment:
             cm, hd, pi, legal = augment_suits(k_aug, cm, hd, pi, legal)
+        batch = (cm, hd, y, pi, legal, mask)
+        if data_parallel:
+            batch = _shard_pv(batch, n_dev)
         params, opt_state, train_loss, _, _ = step_fn(
-            params, opt_state, cm, hd, y, pi, legal, mask)
+            params, opt_state, *batch)
 
         if epoch % print_every == 0:
             _, _, e_loss, e_v, e_p = step_fn(params, opt_state, *eval_batch)
             elapsed = time.perf_counter() - t0
-            print(f"[{epoch:4d}]  train={float(train_loss):.4f}"
-                  f"  eval={float(e_loss):.4f}"
-                  f"  (v={float(e_v):.4f}  p={float(e_p):.4f})"
+            print(f"[{epoch:4d}]  train={scalar(train_loss):.4f}"
+                  f"  eval={scalar(e_loss):.4f}"
+                  f"  (v={scalar(e_v):.4f}  p={scalar(e_p):.4f})"
                   f"  ({elapsed:.0f}s)")
 
         if checkpoint_path is not None and (epoch + 1) % checkpoint_every == 0:
-            _save_checkpoint(checkpoint_path, params, opt_state, epoch + 1,
-                             slot=(epoch + 1) // checkpoint_every)
+            ck_params, ck_opt_state = unrep((params, opt_state))
+            _save_checkpoint(checkpoint_path, ck_params, ck_opt_state,
+                             epoch + 1, slot=(epoch + 1) // checkpoint_every)
 
-    return params, model
+    return unrep(params), model
 
 
 # ── CLI Driver ────────────────────────────────────────────────────────────────

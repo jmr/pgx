@@ -28,11 +28,15 @@ significant)**; PUCT@64 deployed check **FLAT (+1.1 ns)**.
    candidate channels: value labels from stronger games, visit
    distributions as variance-reduced self-distillation targets, corpus
    volume (the 15-batch dose-response arm separates these).
-2. **Search no longer converts at the deployed config** — PUCT@64
-   washed out a +5/+10 raw edge (deployed-conversion trend: +3.5 →
-   +2.2 → +5.2 → +1.1). If the queued gen-7 PUCT@64-vs-raw probe reads
-   ≤ 0, deployment and the JTR calibration should submit RAW (~65×
-   cheaper per move).
+2. **Search now HURTS at the deployed config: DEPLOY RAW.** gen-7
+   PUCT@64 vs its own raw = **−6.3 (p=0.0033)**; the flat promotion
+   check (+1.1) was two nets each dragged down by their own search
+   masking a +5/+10 raw gap. The PUCT@64 deployed check is retired
+   (the raw gate covers deployed strength); JTR submits raw once the
+   export scripts get attn support. Open crank question: gen-8's
+   teacher has NEGATIVE play margin — the queued raw-corpus arm tests
+   whether visit distributions still carry signal (if not, Stage 1
+   collapses from ~1.8 h to ~2 min).
 
 **NEXT: gen-8 crank — same recipe end-to-end, ~2.4 h/generation**
 (collect 64k ≈ 1.8 h + train 10k ≈ 37 min; stopping epoch now known, no

@@ -103,9 +103,11 @@ print_stats(f"gen-{GEN} raw", f"gen-{SRC} raw",
   ~50% result usually means you fed the *same* net twice.
 - **Promote** on a significant raw-vs-raw win (two seeds, p<0.05) →
   `pv_gen{GEN}_s128.msgpack`.
-- **PUCT@64 vs the champion** (`make_puct_action_fn`, greedy, K=8/sims=64) is
-  now a **deployed-strength check only**, not the climb signal — expect it to
-  under-read policy gains.
+- **The PUCT@64 deployed check is RETIRED (2026-07-04): the deployed
+  config is RAW** — gen-7 PUCT@64 measured −6.3 (p=0.0033) vs its own
+  raw, so searched play now under-reads AND underperforms; the raw gate
+  covers deployed strength too. PUCT-vs-PUCT arenas remain diagnostics
+  only.
 
 ## Diagnostics (when a gate looks off)
 
@@ -166,10 +168,14 @@ need TWO model instances.
 
 1. **gen-8 crank** — same recipe end-to-end (64k @ K=8/sims=128, ES
    @10k): ~2.4 h/generation now that the stopping epoch is known.
-2. **Deployment probe: gen-7 PUCT@64 vs gen-7 raw** (240 pairs,
-   seed-looped 80×3). PUCT@64 washed out a +5/+10 raw edge between
-   generations and @128 measured ≤ raw on gen-6b_es — if @64 ≤ raw here,
-   the deployed/JTR config should be RAW (~65× cheaper per move).
+2. ~~Deployment probe~~ **DONE 2026-07-04: −6.3, p=0.0033 — search
+   HURTS at the deployed config. DEPLOY RAW** (τ=0.05/greedy; JTR
+   submits raw once the export scripts get attn support). The PUCT@64
+   deployed check is retired from the gate (raw gate covers both
+   roles). New decisive arm queued: **raw-generated corpus** (~65×
+   cheaper Stage 1) vs PUCT corpus — does the negative-margin teacher's
+   visit distribution still carry signal, or is the channel
+   value-labels + volume? Full entry in the log.
 3. **Weight-decay arm** (`optimizer=optax.adamw(3e-4, weight_decay=1e-2)`,
    passthrough landed 2026-07-03): pipeline economics — retire the
    per-corpus-size full-log calibration run. Success: holdout v holds

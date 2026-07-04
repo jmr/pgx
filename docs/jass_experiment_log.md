@@ -1127,3 +1127,38 @@ ES @10k; ~2.4 h/generation now that the stopping epoch is known);
 (pipeline economics: retire the per-corpus-size full-log calibration
 run); (4) optional 15-batch dose-response arm; (5) attn support in the
 JTR export scripts, then a gen-7 POWERFUL calibration.
+
+## 2026-07-04 — Deployment probe: gen-7 PUCT@64 vs its own raw = −6.3 (p=0.0033) — search HURTS at the deployed config; DEPLOY RAW
+
+240 pairs (80×3 seed-looped), gen-7 PUCT@64 (K=8, greedy) vs gen-7 raw
+(τ=0.05): **mean −6.3/game, t=−2.97, p=0.0033 — significantly
+negative.** Search at the deployed config is now a handicap, not a
+wash. Own-search-margin trendline: +26 (gen-3 @128) → +11.1 (gen-4) →
++3.0 ns (gen-5b) → −3.4 ns (gen-6b_es @128) → **−6.3 sig (gen-7 @64)**.
+
+- **DECISION: the deployed config is RAW** (policy head, τ=0.05/greedy —
+  ~65× cheaper per move). The JTR calibration should submit raw once the
+  export scripts get attn support. **The "PUCT@64 deployed check" is
+  RETIRED from the gate procedure** — deployed strength = raw strength,
+  so the raw progress gate now covers both roles.
+- **This explains the flat promotion check**: gen-7 PUCT@64 vs
+  gen-6b_es PUCT@64 (+1.1 ns) was two nets each dragged down by their
+  own search — the +5/+10 raw gap was real and search masked it. The
+  deployed-conversion "trend" (+3.5 → +2.2 → +5.2 → +1.1) was measuring
+  progressively worse search handicaps, not gain compression.
+- **Mechanism (consistent with the whole arc):** the net's own move
+  choice is now better than 64-sim/K=8 determinized search statistics —
+  the search injects determinization noise and shallow-rollout value
+  noise that the policy head has already averaged over in training.
+- **Open question this raises for the CRANK: gen-8's teacher has
+  NEGATIVE play margin.** gen-7 proved a zero-margin teacher still
+  distills (+5/+10); whether a negative-margin teacher's visit
+  distributions still carry sharpening signal is untested. Cheap
+  decisive arm: **collect a RAW-generated corpus** (value labels from
+  raw τ=1.0 self-play — ~65× cheaper, 64k in minutes; policy targets
+  one-hot self-imitation) and gate its student against the PUCT-corpus
+  student. If they tie, the improvement channel is value-labels +
+  volume, Stage 1 drops from ~1.8 h to ~2 min, and search exits the
+  loop entirely. If the PUCT student wins, the visit-distribution
+  self-distillation channel is real and search stays as the
+  target-generator only.

@@ -154,10 +154,14 @@ TWO model instances.
    @128 −0.2 (p=0.92), K=8 @128 −3.4 (p=0.11). Search adds nothing over
    gen-6b_es raw at any reachable sharpness → gen-7 collects at the
    cheap baseline (K=8/sims=128), NOT sharp. Full entry in the log.
-2. **Collect re-profile** (`profile_collect_fn`, 1×1, attn generator) —
-   the B×K≈512 VMEM optimum was profiled with the OLD net (attn forward
+2. **Collect re-profile** (`profile_collect_fn`, attn generator) — the
+   B×K≈512 VMEM optimum was profiled with the OLD net (attn forward
    ~6.5× on CPU). This prices Stage 1 and decides the gen-7 corpus size
-   (below).
+   (below). Runtime: technically fine on the 2×4 (pins device 0; the
+   per-chip optimum transfers per pmap shard), but 7 idle chips may risk
+   eviction — if evicted, rerun on a 1×1; the numbers are identical
+   either way (rows print as they complete, so a partial sweep isn't
+   wasted).
 3. **PUCT@64 vs raw on gen-6b_es** (new, from the probe result): if @128
    ≤ raw then the deployed/JTR config @64 presumably is too — would the
    JTR calibration do better submitting the RAW policy (~65× cheaper per

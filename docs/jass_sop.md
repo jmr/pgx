@@ -148,20 +148,21 @@ TWO model instances.
   `data_parallel=True`. Training-health check for attn: eval v ≈
   0.115 ± 0.002 at 7k (the old 0.13–0.14 band is the *old architecture's*
   level).
-**OWED gen-6b_es measurements (next colab session, in order):**
+**OWED gen-6b_es measurements (in order):**
 
-1. **Operator re-probe** (pre-registered; CPU runtime suffices): gen-6b_es
-   PUCT vs its own raw (both `attn_model.apply`), K=16 @128 arm first,
-   then K=8 @128; τ=0.05, seed-looped chunks (80×3 / 20×12 for K·sims
-   8·128 / 16·128 — the attn net's bigger working set may need smaller
-   chunks; if a chunk hangs, halve it). gen-5b baseline was +3.0/+3.8 ns;
-   a jump off ~0 = policy fuel is back → gen-7 policy targets are worth
-   collecting sharp.
+1. ~~Operator re-probe~~ **DONE 2026-07-04: gauge reads ZERO** — K=16
+   @128 −0.2 (p=0.92), K=8 @128 −3.4 (p=0.11). Search adds nothing over
+   gen-6b_es raw at any reachable sharpness → gen-7 collects at the
+   cheap baseline (K=8/sims=128), NOT sharp. Full entry in the log.
 2. **Collect re-profile** (`profile_collect_fn`, 1×1, attn generator) —
    the B×K≈512 VMEM optimum was profiled with the OLD net (attn forward
    ~6.5× on CPU). This prices Stage 1 and decides the gen-7 corpus size
    (below).
-3. Optional: top-1 adoption diagnostics (gen-6b_es and gen-6 vs the
+3. **PUCT@64 vs raw on gen-6b_es** (new, from the probe result): if @128
+   ≤ raw then the deployed/JTR config @64 presumably is too — would the
+   JTR calibration do better submitting the RAW policy (~65× cheaper per
+   move)? 240 pairs, same seed-loop method.
+4. Optional: top-1 adoption diagnostics (gen-6b_es and gen-6 vs the
    teacher, held-out batch); JTR calibration of gen-6b_es — blocked on
    attn support in the export scripts (they hardcode `PolicyValueNet()`).
 
@@ -171,7 +172,10 @@ fix for the attn overfit, replacing early stopping.** Overfit onset was
 **32 batches × 2048 = 64k games** halves passes-per-epoch and feeds the
 spare capacity — and the value head benefits from more games regardless
 of the operator margin (value targets are game outcomes, not
-search-dependent). Train the attn net full-length on it, full logs: if
+search-dependent). Re-priced by the 2026-07-04 probe: collect at
+K=8/sims=128 (sharpness buys nothing); the corpus case is value-half +
+capacity, not better policy targets. Train the attn net full-length on
+it, full logs: if
 the U-curve minimum moves past 20k, early stopping retires. Per-epoch
 training cost is unchanged (one batch per step); only Stage-1 cost
 scales — hence the re-profile first. Do NOT pad with older generations'

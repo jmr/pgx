@@ -984,3 +984,52 @@ retrain to 7,000 epochs** (same recipe, fresh anchor) →
    scripts (`extract_pv_weights.py` / `export_pv_savedmodel.py`)
    hardcode `PolicyValueNet()` — they need attn support before the next
    external calibration.
+
+## 2026-07-04 — Operator re-probe on gen-6b_es: gauge reads ZERO — search adds nothing over the new raw policy
+
+The probe pre-registered by the sharpening-probe DECISION: gen-6b_es
+PUCT@128 (greedy) vs its own raw (τ=0.05, both `attn_model.apply`),
+`policy_match`, 240 pairs/arm, seed-looped (20×12 / 80×3 for K=16/K=8;
+~70 s/chunk — the "minutes on CPU" SOP framing is stale for the attn
+net, see the chip-parallelization TODO).
+
+| arm                    | mean/game | p      |
+|------------------------|-----------|--------|
+| @128, K=16 (live axis) | −0.2      | 0.92   |
+| @128, K=8 (baseline)   | −3.4      | 0.11   |
+
+- **The operator did NOT re-open.** Fuel trendline at K=8·128: +26
+  (gen-3) → +11.1 (gen-4) → +3.0 ns (gen-5b) → **−3.4 ns (gen-6b_es)**.
+  The "a materially better net re-opens Step 3" hypothesis is refuted at
+  every reachable sharpness: the value-head upgrade lifted RAW play past
+  what its own search can improve on — leaf quality and policy quality
+  rose together, so the margin between them stayed ~0.
+- **K=8 leans negative** (−3.4, p=0.11): with no leaf-evaluation margin
+  left to spend, K=8's determinization noise plausibly *costs* points;
+  K=16 (−0.2) merely cancels it back to zero. Same K-is-the-live-axis
+  reading as the gen-5b sweep, one generation later and 4 points lower.
+- Same picture from the promotion gates, in hindsight: gen-6b_es beat
+  gen-5b by MORE raw-vs-raw (+10.3/+7.4) than PUCT@64-vs-PUCT@64
+  (+5.2) — search compresses this net's edge rather than amplifying it.
+
+**What it means for gen-7 (the 64k DECISION stands, but re-priced):**
+
+1. **Do NOT pay for sharpness.** Collect at the cheap baseline
+   (K=8/sims=128) — K=16 and sims=256 buy zero play-strength margin at
+   2× the working set. The pre-registered "collect sharp if the gauge
+   jumps" branch is dead.
+2. **The corpus case is now value-half + capacity only.** Value targets
+   are game outcomes from play 10 pts/game stronger than the gen-6
+   corpus's generator; the policy half's expected quality is "gen-6b_es
+   raw + search noise". Per the standing fuel-gauge demotion (promotion
+   entry: the gauge measures the teacher's margin over its own raw, NOT
+   distillable content for a better student — gen-6b_es itself came out
+   of a +3.0 ns corpus), a flat gauge doesn't kill the corpus; but any
+   gen-7 policy gain must come from volume feeding the attn capacity,
+   not from better targets.
+3. **Cheap open question — does deployment still want search at all?**
+   If PUCT@128 ≤ raw, PUCT@64 (the deployed/JTR config) is presumably
+   also ≤ raw. A 240-pair gen-6b_es PUCT@64-vs-raw probe would settle
+   whether the JTR calibration should submit the RAW policy (~65×
+   cheaper per move) and whether the "deployed check" gate config needs
+   rethinking.

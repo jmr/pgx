@@ -27,15 +27,24 @@ corrections — notably: gen-6's "fuel exhaustion" was
 architecture-relative, the corpus held +10 the old net couldn't extract)
 in the experiment log, 2026-07-03 entries.
 
-**NEXT: (1) operator re-probe on gen-6b_es** (PUCT vs own raw, K=16 arm
-first — pre-registered by the sharpening-probe DECISION; a jump off ~0
-means gen-7's policy targets are worth collecting sharp); **(2) gen-7
-with a LARGER corpus (64k games, 2026-07-03 DECISION)** — the principled
-fix for the attn overfit, replacing early stopping; re-profile the
-per-chip collect optimum first (attn generator, ~6.5× forward).
-Weight decay / dropout are fallback arms if a big corpus still overfits.
-Also owed: attn support in the JTR export scripts (they hardcode
-`PolicyValueNet()`), then a gen-6b_es POWERFUL calibration.
+**Operator re-probe (2026-07-04): the gauge reads ZERO** — gen-6b_es
+PUCT@128 vs own raw: K=16 −0.2 (p=0.92), K=8 −3.4 (p=0.11). The
+value-head upgrade lifted raw play past what its own search can improve
+on; "a better net re-opens Step 3" is refuted at every reachable
+sharpness. Per the standing fuel-gauge demotion this doesn't kill the
+gen-7 corpus — but it re-prices it: value-half + capacity, collected
+cheap.
+
+**NEXT: gen-7 with a LARGER corpus (64k games, 2026-07-03 DECISION)** —
+the principled fix for the attn overfit, replacing early stopping;
+collect at the cheap baseline (K=8/sims=128 — sharpness buys nothing);
+re-profile the per-chip collect optimum first (attn generator, ~6.5×
+forward). Weight decay / dropout are fallback arms if a big corpus
+still overfits. New cheap probe queued: gen-6b_es PUCT@64 vs raw — if
+search doesn't beat raw at the deployed config either, the JTR
+calibration should submit the raw policy. Also owed: attn support in
+the JTR export scripts (they hardcode `PolicyValueNet()`), then a
+gen-6b_es POWERFUL calibration.
 Training now runs on the 2×4 (`data_parallel=True`, ~20 s/100 epochs →
 7k in ~25 min). Owed-measurement details → jass_sop.md.
 

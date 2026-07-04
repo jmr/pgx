@@ -1033,3 +1033,27 @@ net, see the chip-parallelization TODO).
    whether the JTR calibration should submit the RAW policy (~65×
    cheaper per move) and whether the "deployed check" gate config needs
    rethinking.
+
+## 2026-07-04 — Collect re-profile with the attn generator: knee at B=8, but ms/game barely moved — Stage 1 stays cheap
+
+`profile_collect_fn`, gen-6b_es generator (`PolicyValueNetAttn`,
+K=8/sims=128, temperature=1.0), one chip:
+
+| B  | ms/game |
+|----|---------|
+| 4  | 684     |
+| 8  | **615** |
+| 16 | 753     |
+
+- **The VMEM knee moved 8×: B×K≈512 → B×K≈64** (old net: min at B=64).
+  Consistent with the attn forward's activations eating the scratchpad
+  that used to hold tree state.
+- **But the optimum ms/game is only ~9% worse than the old net's**
+  (615 vs 563): Stage-1 collection was tree/VMEM-bound, not model-bound,
+  so the ~6.5× (CPU) forward barely shows up at the per-chip optimum.
+  The feared "attn generator re-prices Stage 1" scenario did not happen.
+- **gen-7 64k pricing: ~160 s per 2048-game saved batch on the 2×4**
+  (256 games/chip × 0.615 s) **× 32 batches ≈ 1.4 h** — about the same
+  wall-clock as the old 32k corpus (~180 s/batch × 16). At B=8/chip a
+  2048-game batch is 32 pmap calls of 64 games (vs the old 4×512), so
+  expect a little extra host-dispatch overhead on top of the ~160 s.

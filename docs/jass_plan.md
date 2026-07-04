@@ -37,9 +37,10 @@ cheap.
 
 **NEXT: gen-7 with a LARGER corpus (64k games, 2026-07-03 DECISION)** —
 the principled fix for the attn overfit, replacing early stopping;
-collect at the cheap baseline (K=8/sims=128 — sharpness buys nothing);
-re-profile the per-chip collect optimum first (attn generator, ~6.5×
-forward). Weight decay / dropout are fallback arms if a big corpus
+collect at the cheap baseline (K=8/sims=128 — sharpness buys nothing).
+Priced 2026-07-04: per-chip optimum B=8 (knee moved 8× for the attn
+generator, ms/game only ~9% worse) → **64k ≈ 1.4 h on the 2×4**.
+Weight decay / dropout are fallback arms if a big corpus
 still overfits. New cheap probe queued: gen-6b_es PUCT@64 vs raw — if
 search doesn't beat raw at the deployed config either, the JTR
 calibration should submit the raw policy. Also owed: attn support in

@@ -38,19 +38,23 @@ this is the **entire** training set: **the step2 anchor is RETIRED** (its
 50% share caused the gen-5 plateau — see the experiment log). Keep
 `corpus_k8_v1_24x4096` on Drive; never regenerate it, never train on it.
 
-- `make_puct_policy_fn(pv_model.apply, src_params, num_determinizations=8,`
+- `make_puct_policy_fn(attn_model.apply, src_params, num_determinizations=8,`
   `num_simulations=128, temperature=1.0)`, pmap'd over the 8 chips.
-- **Per-chip batch = 64 games** (the profiled VMEM optimum; ~5× faster than
-  the old 256/chip — see jass_plan "HOW TO SCALE STAGE 1"). Keep the *saved*
-  batch at 2048: collect each 2048-game batch as **4 pmap calls of 512**
-  (64/chip) and concat, so training (which makes each saved batch one
+- **Per-chip batch = 8 games with the attn generator** (profiled
+  2026-07-04: 615 ms/game at B=8 vs 684 @4 / 753 @16 — the VMEM knee
+  moved 8× vs the old net's B=64, but the optimum ms/game barely moved,
+  563→615: collection is tree-bound, not model-bound). Keep the *saved*
+  batch at 2048: collect each 2048-game batch as **32 pmap calls of 64**
+  (8/chip) and concat, so training (which makes each saved batch one
   2048-game step) is unchanged.
-- 16 saved batches × 2048 = 32k games. Write each shard once
+- gen-7: 32 saved batches × 2048 = 64k games. Write each shard once
   (`corpus_gen{SRC}_s128_batch_{i:03d}.pickle`) and probe with `open()` for
   **restart-safe resume**; assemble the list-of-per-batch-6-tuples
-  `(cm, hd, labels, pi, legal, alive)` at the end. Steady ~180 s/batch.
+  `(cm, hd, labels, pi, legal, alive)` at the end. Expect ~160 s/batch
+  (+ host dispatch for the 32 pmap calls) → **~1.4 h for 64k**.
 - Re-profile the per-chip optimum with `jass_selfplay.profile_collect_fn`
-  **if K or sims change** (the optimum tracks the tree working set, B×K≈512).
+  **if K, sims, or the architecture change** (the optimum tracks the
+  tree+activations working set; attn: B×K≈64, old net: B×K≈512).
 
 ## Stage 2 — Train (1×1 if TPU budget-limited, else 2×4; ~1 h)
 
@@ -154,14 +158,10 @@ TWO model instances.
    @128 −0.2 (p=0.92), K=8 @128 −3.4 (p=0.11). Search adds nothing over
    gen-6b_es raw at any reachable sharpness → gen-7 collects at the
    cheap baseline (K=8/sims=128), NOT sharp. Full entry in the log.
-2. **Collect re-profile** (`profile_collect_fn`, attn generator) — the
-   B×K≈512 VMEM optimum was profiled with the OLD net (attn forward
-   ~6.5× on CPU). This prices Stage 1 and decides the gen-7 corpus size
-   (below). Runtime: technically fine on the 2×4 (pins device 0; the
-   per-chip optimum transfers per pmap shard), but 7 idle chips may risk
-   eviction — if evicted, rerun on a 1×1; the numbers are identical
-   either way (rows print as they complete, so a partial sweep isn't
-   wasted).
+2. ~~Collect re-profile~~ **DONE 2026-07-04: per-chip B=8, 615 ms/game**
+   (knee moved 8× to B×K≈64; optimum ms/game only ~9% worse than the old
+   net — collection is tree-bound). gen-7 64k ≈ 1.4 h on the 2×4.
+   Stage-1 numbers above updated; full entry in the log.
 3. **PUCT@64 vs raw on gen-6b_es** (new, from the probe result): if @128
    ≤ raw then the deployed/JTR config @64 presumably is too — would the
    JTR calibration do better submitting the RAW policy (~65× cheaper per

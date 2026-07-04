@@ -109,7 +109,17 @@ won't respond to interrupt* (the interrupt only fires between Python ops; a
 monolithic vmap gives no such window). Instead loop seeds at ≤80 pairs and
 pool: `np.concatenate([policy_match(a, b, PRNGKey(s), 80) for s in range(3)])`
 → 240 pairs at the memory cost of 80, and interruptible between chunks. (Raw
-`policy_match` is cheap and safe at 300.) Diagnostics:
+`policy_match` is cheap and safe at 300.)
+
+**TODO — parallelize probe chunks across TPU chips.** With the attn net
+the seed-looped probes are no longer "minutes on CPU": the gen-6b_es
+K=16 @128 arm ran ~70 s/chunk × 12 chunks (~14 min/arm), single-device —
+`policy_match` is plain `jit`+`vmap`, no pmap/sharding. On a 2×4 runtime
+it uses 1 of 8 chips; distributing the seed chunks across devices
+(`jax.device_put` params per device, round-robin chunks) is ~8× without
+touching `policy_match` itself. Worth doing before the next probe sweep.
+
+Diagnostics:
 
 - **Operator (starved?):** gen-`SRC` PUCT vs gen-`SRC` RAW, swept sims. A
   *small/negative* margin = starved → bump corpus sims. A *large* margin

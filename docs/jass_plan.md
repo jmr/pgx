@@ -38,11 +38,16 @@ significant)**; PUCT@64 deployed check **FLAT (+1.1 ns)**.
    whether visit distributions still carry signal (if not, Stage 1
    collapses from ~1.8 h to ~2 min).
 
-**NEXT: gen-8 crank — same recipe end-to-end, ~2.4 h/generation**
-(collect 64k ≈ 1.8 h + train 10k ≈ 37 min; stopping epoch now known, no
-calibration run). Queued arms (order + details → jass_sop.md):
-deployment probe, weight-decay arm (pipeline economics), 15-batch
-dose-response, JTR attn export + gen-7 POWERFUL calibration.
+**NEXT (decided 2026-07-04, end of session): (1) JTR export + testing
+for the attn nets (gen-6b_es / gen-7)** — `extract_pv_weights.py` needs
+the attn template (small); `export_pv_savedmodel.py` is a TF/Keras
+REIMPLEMENTATION of the forward pass, so it needs the attn architecture
+ported (scope details → jass_sop.md queue item 1). Then a gen-7
+POWERFUL calibration submitting RAW (per the deploy-raw DECISION).
+**(2) tomorrow: gen-8 crank as a raw-vs-PUCT corpus A/B**, raw arm
+first (~45 min end-to-end; if its student gates flat vs gen-7, fall
+back to the standard PUCT collection — nothing lost). Then: weight-decay
+arm, 15-batch dose-response (details → jass_sop.md).
 
 ## Previous snapshot (2026-07-03)
 

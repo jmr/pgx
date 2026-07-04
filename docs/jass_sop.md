@@ -164,18 +164,36 @@ need TWO model instances.
   plus `model=PolicyValueNetAttn()` and `data_parallel=True`.
   Training-health check for attn: eval v at the floor ≈ 0.113–0.115
   (the old 0.13–0.14 band is the *old architecture's* level).
-**Queued measurements/arms (post gen-7 promotion, in rough order):**
+**Queued work (order decided end-of-session 2026-07-04):**
 
-1. **gen-8 crank** — same recipe end-to-end (64k @ K=8/sims=128, ES
-   @10k): ~2.4 h/generation now that the stopping epoch is known.
-2. ~~Deployment probe~~ **DONE 2026-07-04: −6.3, p=0.0033 — search
-   HURTS at the deployed config. DEPLOY RAW** (τ=0.05/greedy; JTR
-   submits raw once the export scripts get attn support). The PUCT@64
-   deployed check is retired from the gate (raw gate covers both
-   roles). New decisive arm queued: **raw-generated corpus** (~65×
-   cheaper Stage 1) vs PUCT corpus — does the negative-margin teacher's
-   visit distribution still carry signal, or is the channel
-   value-labels + volume? Full entry in the log.
+1. **NEXT: JTR export + testing for the attn nets (gen-6b_es / gen-7),
+   then a gen-7 POWERFUL calibration submitting RAW** (deploy-raw
+   DECISION, 2026-07-04). Scope (surveyed 2026-07-04):
+   - `scripts/extract_pv_weights.py` hardcodes `PolicyValueNet()` at
+     `model = PolicyValueNet()` — needs an `--arch` flag or template-free
+     msgpack_restore (small).
+   - `scripts/export_pv_savedmodel.py` is a **TF/Keras REIMPLEMENTATION
+     of the forward pass** (its `PolicyValueNet(tf.keras.Model)` mirrors
+     the flax module exactly) — attn support = porting
+     `PolicyValueNetAttn` (hidden=128, num_heads=4, num_layers=2;
+     header broadcast into all 36 card rows pre-embedding; pre-LN
+     transformer blocks of MultiHeadDotProductAttention + gelu MLP with
+     residuals; learned-query attention pool `pool_query`; card logits
+     read off attended rows) + the flax→keras weight-name mapping, and a
+     parity test vs `attn_model.apply` on random inputs.
+   - Raw deployment means JTR only needs the POLICY head path verified,
+     but export both heads (the SavedModel contract is shared).
+2. **Tomorrow: gen-8 crank as a raw-vs-PUCT corpus A/B** (gen-7
+   generator both arms, 64k each, same training recipe, ES @10k):
+   - **Raw arm FIRST** (~45 min end-to-end: raw τ=1.0 self-play collects
+     64k in ~minutes — forward-only, ~65× cheaper; policy targets =
+     one-hot own-sampled moves ≈ policy stays put, value channel live).
+     Student gates flat vs gen-7 → visit distributions were the live
+     channel; collect the standard PUCT arm, nothing lost. Student
+     climbs → gen-8 for 45 min and search exits Stage 1.
+   - PUCT arm per the standard recipe (~1.8 h collect) if needed, or as
+     an optional head-to-head (A-student vs B-student) to measure the
+     target-sharpening channel directly.
 3. **Weight-decay arm** (`optimizer=optax.adamw(3e-4, weight_decay=1e-2)`,
    passthrough landed 2026-07-03): pipeline economics — retire the
    per-corpus-size full-log calibration run. Success: holdout v holds
@@ -183,9 +201,6 @@ need TWO model instances.
 4. Optional: **15-batch dose-response arm** (`batches[:15]` + same
    holdout — gen-6b's corpus size with gen-7's generator) to separate
    corpus-volume from target-quality channels in the gen-7 climb.
-5. Attn support in the JTR export scripts (they hardcode
-   `PolicyValueNet()`), then a gen-7 POWERFUL calibration — submit raw
-   or PUCT per the outcome of (2).
 
 **gen-7 DECISION (2026-07-03): collect a LARGER corpus — the principled
 fix for the attn overfit, replacing early stopping.**

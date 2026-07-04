@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """
-Export PolicyValueNet as a TF2 SavedModel for use with TensorFlow-Java.
+Export PolicyValueNet / PolicyValueNetAttn as a TF2 SavedModel for
+TensorFlow-Java.
 
 Run this in the .venv_tf environment (Python 3.13, tensorflow==2.20.*).
 See scripts/README.md for setup instructions.
 It does NOT require JAX or Flax.  Weights come from a .npz file produced by
 extract_pv_weights.py (or are random-initialised when --weights is omitted).
 
-The Keras model is a faithful reimplementation of
-    pgx/_src/games/jass_value_net.py :: PolicyValueNet
-using tf.nn.gelu(approximate=True) to match Flax's default approximate GELU.
+The Keras models are faithful reimplementations of
+    pgx/_src/games/jass_value_net.py :: PolicyValueNet / PolicyValueNetAttn
+using tf.nn.gelu(approximate=True) to match Flax's default approximate GELU
+and LayerNormalization(epsilon=1e-6) to match Flax's nn.LayerNorm default.
+The architecture is inferred from the .npz keys (pool_query ⇒ attn);
+--arch only selects the random-init architecture when --weights is omitted.
 
 Usage:
     # Random-init (pipeline smoke-test — no real weights needed):
@@ -18,7 +22,7 @@ Usage:
 
     # Real weights:
     .venv_tf/bin/python scripts/export_pv_savedmodel.py \
-        --weights /tmp/pv_gen3.npz \
+        --weights /tmp/pv_gen7b.npz \
         --out ../JassTheRipper/src/main/resources/models/pgx_pv/export
 
 Serving signature:
@@ -125,6 +129,111 @@ class PolicyValueNet(tf.keras.Model):
         return {"logits": logits, "value": value}
 
 
+class PolicyValueNetAttn(tf.keras.Model):
+    """TF/Keras reimplementation of pgx PolicyValueNetAttn.
+
+    Same dict-input call() convention as PolicyValueNet above.  Forward pass
+    mirrors jass_value_net.py::PolicyValueNetAttn.__call__ exactly:
+      1. Concat card matrix + static identity + broadcast header → (B,36,45).
+      2. Dense embed → (B,36,128).
+      3. num_layers pre-LN transformer blocks (MHA + gelu MLP, residual).
+      4. Final LayerNorm → rows (B,36,128).
+      5. Learned-query attention pool over rows → pooled (B,128).
+      6. y = concat(pooled, header) (B,148).
+      7. Card head: dense→gelu on rows, dense→card_logits (B,36).
+      8. Value head: dense→gelu→Dense(1) → value (B,).
+      9. Trump head: dense→gelu→Dense(7) → trump_logits (B,7).
+
+    Flax parity notes: LayerNormalization uses epsilon=1e-6 (Flax nn.LayerNorm
+    default; Keras default is 1e-3).  Keras MultiHeadAttention and Flax
+    MultiHeadDotProductAttention share kernel layouts — q/k/v (in, heads,
+    head_dim), out (heads, head_dim, out) — and both scale scores by
+    1/sqrt(head_dim).
+    """
+
+    def __init__(self, hidden: int = HIDDEN, num_heads: int = 4,
+                 num_layers: int = 2) -> None:
+        super().__init__()
+        self._card_identity = tf.constant(CARD_IDENTITY)   # (36,13)
+        self._hidden = hidden
+        h = hidden
+        self.embed = tf.keras.layers.Dense(h, name="Dense_0")
+        self.blocks = []
+        for i in range(num_layers):
+            self.blocks.append({
+                "ln_attn": tf.keras.layers.LayerNormalization(
+                    epsilon=1e-6, name=f"LayerNorm_{2 * i}"),
+                "attn": tf.keras.layers.MultiHeadAttention(
+                    num_heads=num_heads, key_dim=h // num_heads,
+                    name=f"MultiHeadDotProductAttention_{i}"),
+                "ln_mlp": tf.keras.layers.LayerNormalization(
+                    epsilon=1e-6, name=f"LayerNorm_{2 * i + 1}"),
+                "mlp_up": tf.keras.layers.Dense(
+                    2 * h, name=f"Dense_{2 * i + 1}"),
+                "mlp_down": tf.keras.layers.Dense(
+                    h, name=f"Dense_{2 * i + 2}"),
+            })
+        self.ln_final = tf.keras.layers.LayerNormalization(
+            epsilon=1e-6, name=f"LayerNorm_{2 * num_layers}")
+        self.pool_query = self.add_weight(
+            name="pool_query", shape=(1, h), trainable=True)
+        self.pool_attn = tf.keras.layers.MultiHeadAttention(
+            num_heads=num_heads, key_dim=h // num_heads,
+            name=f"MultiHeadDotProductAttention_{num_layers}")
+        d = 2 * num_layers  # Dense numbering continues after the blocks
+        # Card head
+        self.card_hidden = tf.keras.layers.Dense(h, name=f"Dense_{d + 1}")
+        self.card_out = tf.keras.layers.Dense(1, name=f"Dense_{d + 2}")
+        # Value head
+        self.value_hidden = tf.keras.layers.Dense(h, name=f"Dense_{d + 3}")
+        self.value_out = tf.keras.layers.Dense(1, name=f"Dense_{d + 4}")
+        # Trump head
+        self.trump_hidden = tf.keras.layers.Dense(h, name=f"Dense_{d + 5}")
+        self.trump_out = tf.keras.layers.Dense(
+            NUM_TRUMP_LOGITS, name=f"Dense_{d + 6}")
+
+    def call(self, inputs: dict) -> dict[str, tf.Tensor]:  # type: ignore[override]
+        x = tf.cast(inputs["cm"], tf.float32)   # (B, 36, 12)
+        h = tf.cast(inputs["hd"], tf.float32)   # (B, 20)
+
+        B = tf.shape(x)[0]
+        ident = tf.broadcast_to(self._card_identity[tf.newaxis], [B, 36, 13])
+        h_rows = tf.broadcast_to(h[:, tf.newaxis, :], [B, 36, 20])
+        x = tf.concat([x, ident, h_rows], axis=-1)      # (B, 36, 45)
+
+        x = self.embed(x)                               # (B, 36, 128)
+
+        for blk in self.blocks:
+            y = blk["ln_attn"](x)
+            y = blk["attn"](query=y, value=y)
+            x = x + y
+            y = blk["ln_mlp"](x)
+            y = tf.nn.gelu(blk["mlp_up"](y), approximate=True)
+            y = blk["mlp_down"](y)
+            x = x + y
+
+        rows = self.ln_final(x)                         # (B, 36, 128)
+
+        q = tf.broadcast_to(
+            self.pool_query[tf.newaxis], [B, 1, self._hidden])
+        pooled = tf.squeeze(
+            self.pool_attn(query=q, value=rows), axis=1)  # (B, 128)
+
+        y = tf.concat([pooled, h], axis=-1)             # (B, 148)
+
+        c = tf.nn.gelu(self.card_hidden(rows), approximate=True)
+        card_logits = tf.squeeze(self.card_out(c), axis=-1)   # (B, 36)
+
+        v = tf.nn.gelu(self.value_hidden(y), approximate=True)
+        value = tf.squeeze(self.value_out(v), axis=-1)         # (B,)
+
+        t = tf.nn.gelu(self.trump_hidden(y), approximate=True)
+        trump_logits = self.trump_out(t)                       # (B, 7)
+
+        logits = tf.concat([card_logits, trump_logits], axis=-1)  # (B, 43)
+        return {"logits": logits, "value": value}
+
+
 # ── Weight loading ────────────────────────────────────────────────────────────
 
 _LAYER_MAP = {
@@ -151,17 +260,68 @@ def load_weights_from_npz(model: PolicyValueNet, npz_path: str) -> None:
         print(f"  {layer_name:10s}  kernel {kernel.shape}  bias {bias.shape}")
 
 
+# Keras path segment / variable name → Flax npz key segment
+_SEGMENT_MAP = {
+    "attention_output": "out",  # MHA output projection sublayer
+    "gamma": "scale",           # LayerNormalization scale
+    "beta": "bias",             # LayerNormalization bias
+}
+
+
+def load_attn_weights_from_npz(model: PolicyValueNetAttn, npz_path: str) -> None:
+    """Assign every model variable from the npz by its (mapped) weight path.
+
+    Keras paths like 'policy_value_net_attn/MultiHeadDotProductAttention_0/
+    query/kernel' map to npz keys like 'MultiHeadDotProductAttention_0_query_
+    kernel' (segments joined with '_', _SEGMENT_MAP applied, model-name prefix
+    dropped).  Assigning by path instead of set_weights() makes the load
+    independent of Keras's internal weight ordering.
+    """
+    data = np.load(npz_path)
+    unused = set(data.keys())
+    print("Loading weights:")
+    for w in model.weights:
+        segments = [_SEGMENT_MAP.get(s, s) for s in w.path.split("/")]
+        # Drop leading segments (model name, etc.) until the key matches.
+        key = None
+        for start in range(len(segments)):
+            candidate = "_".join(segments[start:])
+            if candidate in data:
+                key = candidate
+                break
+        if key is None:
+            raise KeyError(f"No npz key found for model weight '{w.path}'")
+        value = data[key]
+        if tuple(w.shape) != value.shape:
+            raise ValueError(
+                f"Shape mismatch for '{key}': model {tuple(w.shape)} "
+                f"vs npz {value.shape}"
+            )
+        w.assign(value)
+        unused.discard(key)
+        print(f"  {key:55s}  {value.shape}")
+    if unused:
+        raise ValueError(f"Unused npz keys (not mapped to any weight): {sorted(unused)}")
+
+
 # ── Export ────────────────────────────────────────────────────────────────────
 
-def export(weights_npz: str | None, out_dir: str) -> None:
-    model = PolicyValueNet()
+def export(weights_npz: str | None, out_dir: str, arch: str = "mlp") -> None:
+    if weights_npz:
+        # Infer architecture from the checkpoint, not the flag.
+        arch = "attn" if "pool_query" in np.load(weights_npz) else "mlp"
+    print(f"Architecture: {arch}")
+    model = PolicyValueNetAttn() if arch == "attn" else PolicyValueNet()
 
     # Build Keras layer weights via a dummy forward pass (required before set_weights)
     dummy = {"cm": tf.zeros([1, 36, 12]), "hd": tf.zeros([1, 20])}
     model(dummy)
 
     if weights_npz:
-        load_weights_from_npz(model, weights_npz)
+        if arch == "attn":
+            load_attn_weights_from_npz(model, weights_npz)
+        else:
+            load_weights_from_npz(model, weights_npz)
     else:
         print("No --weights given — exporting random-init model")
 
@@ -202,10 +362,16 @@ if __name__ == "__main__":
         help="Path to .npz weights file from extract_pv_weights.py (omit for random init)",
     )
     parser.add_argument(
+        "--arch",
+        choices=["mlp", "attn"],
+        default="mlp",
+        help="Architecture for random init (inferred from npz when --weights is given)",
+    )
+    parser.add_argument(
         "--out",
         required=True,
         metavar="DIR",
         help="Output directory for the TF2 SavedModel",
     )
     args = parser.parse_args()
-    export(args.weights, args.out)
+    export(args.weights, args.out, args.arch)

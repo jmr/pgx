@@ -52,6 +52,12 @@ this is the **entire** training set: **the step2 anchor is RETIRED** (its
   **restart-safe resume**; assemble the list-of-per-batch-6-tuples
   `(cm, hd, labels, pi, legal, alive)` at the end. Expect ~160 s/batch
   (+ host dispatch for the 32 pmap calls) → **~1.4 h for 64k**.
+- **Pipelining note (measured gen-7, 2026-07-04): `np.asarray` inside the
+  pmap-call loop costs ~25%** (200 s/batch vs the ~157 s compute bound) —
+  it syncs the chips after every call. Dispatch ALL calls first (append
+  the raw pmap outputs; JAX queues them async so chips run back-to-back),
+  convert to numpy after the loop. Per-call outputs are a few MB on
+  device, so in-flight accumulation is safe.
 - Re-profile the per-chip optimum with `jass_selfplay.profile_collect_fn`
   **if K, sims, or the architecture change** (the optimum tracks the
   tree+activations working set; attn: B×K≈64, old net: B×K≈512).

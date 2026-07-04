@@ -138,18 +138,19 @@ Diagnostics:
   raw. Large + while PUCT-vs-PUCT is flat = the search is masking real policy
   gains (this is now the standing gate, above).
 
-## Current strategic state (2026-07-03, post-promotion)
+## Current strategic state (2026-07-04, post-gen-7 promotion)
 
-**CHAMPION: gen-6b_es (`pv_gen6b_es_s128.msgpack`) — `PolicyValueNetAttn`
-early-stopped at 7k epochs.** Promoted 2026-07-03 on raw +10.3/+7.4
-(both seeds significant) and PUCT@64 deployed **+5.2 (p=0.01)** — the
-first significant deployed gain since gen-3, above the +2–3.5
-policy-compression band: the value-head upgrade converts to searched
-strength. Full arc in the log (overfit post-mortem → U-curve → early
-stop). ⚠ The champion is a DIFFERENT ARCHITECTURE: every cell that loads
-it needs `PolicyValueNetAttn().apply`; a `PolicyValueNet` template
-silently mangles the params. Gate cells against older generations need
-TWO model instances.
+**CHAMPION: gen-7 (`pv_gen7_s128.msgpack`) — `PolicyValueNetAttn`,
+64k corpus, early-stopped at 10k.** Promoted 2026-07-04 on raw
++5.2/+10.2 (both seeds significant); PUCT@64 deployed check FLAT (+1.1
+ns) — search no longer converts raw gains at the deployed config.
+**The operator fuel gauge is RETIRED as a crank gate**: gen-7 climbed
++5/+10 from a corpus whose generator search measured ZERO margin over
+its own raw policy. Plain numeric GEN/SRC anchors work again (gen-8:
+SRC=7). ⚠ Champion + generator are ATTN: every cell that loads them
+needs `PolicyValueNetAttn().apply`; a `PolicyValueNet` template
+silently mangles the params. Gate cells against pre-attn generations
+need TWO model instances.
 
 - **The attn recipe (until the weight-decay arm lands): EARLY-STOP at
   the corpus-size-dependent U-minimum, NOT 20k.** Measured: 15 train
@@ -161,23 +162,24 @@ TWO model instances.
   plus `model=PolicyValueNetAttn()` and `data_parallel=True`.
   Training-health check for attn: eval v at the floor ≈ 0.113–0.115
   (the old 0.13–0.14 band is the *old architecture's* level).
-**OWED gen-6b_es measurements (in order):**
+**Queued measurements/arms (post gen-7 promotion, in rough order):**
 
-1. ~~Operator re-probe~~ **DONE 2026-07-04: gauge reads ZERO** — K=16
-   @128 −0.2 (p=0.92), K=8 @128 −3.4 (p=0.11). Search adds nothing over
-   gen-6b_es raw at any reachable sharpness → gen-7 collects at the
-   cheap baseline (K=8/sims=128), NOT sharp. Full entry in the log.
-2. ~~Collect re-profile~~ **DONE 2026-07-04: per-chip B=8, 615 ms/game**
-   (knee moved 8× to B×K≈64; optimum ms/game only ~9% worse than the old
-   net — collection is tree-bound). gen-7 64k ≈ 1.4 h on the 2×4.
-   Stage-1 numbers above updated; full entry in the log.
-3. **PUCT@64 vs raw on gen-6b_es** (new, from the probe result): if @128
-   ≤ raw then the deployed/JTR config @64 presumably is too — would the
-   JTR calibration do better submitting the RAW policy (~65× cheaper per
-   move)? 240 pairs, same seed-loop method.
-4. Optional: top-1 adoption diagnostics (gen-6b_es and gen-6 vs the
-   teacher, held-out batch); JTR calibration of gen-6b_es — blocked on
-   attn support in the export scripts (they hardcode `PolicyValueNet()`).
+1. **gen-8 crank** — same recipe end-to-end (64k @ K=8/sims=128, ES
+   @10k): ~2.4 h/generation now that the stopping epoch is known.
+2. **Deployment probe: gen-7 PUCT@64 vs gen-7 raw** (240 pairs,
+   seed-looped 80×3). PUCT@64 washed out a +5/+10 raw edge between
+   generations and @128 measured ≤ raw on gen-6b_es — if @64 ≤ raw here,
+   the deployed/JTR config should be RAW (~65× cheaper per move).
+3. **Weight-decay arm** (`optimizer=optax.adamw(3e-4, weight_decay=1e-2)`,
+   passthrough landed 2026-07-03): pipeline economics — retire the
+   per-corpus-size full-log calibration run. Success: holdout v holds
+   the floor at 20k with the seen-vs-holdout gap closed.
+4. Optional: **15-batch dose-response arm** (`batches[:15]` + same
+   holdout — gen-6b's corpus size with gen-7's generator) to separate
+   corpus-volume from target-quality channels in the gen-7 climb.
+5. Attn support in the JTR export scripts (they hardcode
+   `PolicyValueNet()`), then a gen-7 POWERFUL calibration — submit raw
+   or PUCT per the outcome of (2).
 
 **gen-7 DECISION (2026-07-03): collect a LARGER corpus — the principled
 fix for the attn overfit, replacing early stopping.**

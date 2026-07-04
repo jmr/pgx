@@ -9,7 +9,38 @@ markers as work completes. **Dated experiment results and diagnostics live in
 `docs/jass_experiment_log.md`** (append new results there; this file keeps
 conclusions and pointers). The per-generation procedure is `docs/jass_sop.md`.
 
-## Status snapshot (2026-07-03)
+## Status snapshot (2026-07-04)
+
+**CHAMPION: gen-7 (`pv_gen7_s128.msgpack`) — `PolicyValueNetAttn`
+trained on the first gen-6b_es-generated corpus (64k games,
+K=8/sims=128, per-chip B=8), early-stopped at 10k** (the 64k U-curve
+bottoms ~0.113, flat 7.5–11k, onset ~12k: a bigger corpus deepens the
+floor and softens memorization but does NOT retire early stopping).
+Gates vs gen-6b_es: **raw +5.2/+10.2 (t=3.08/5.74, both seeds
+significant)**; PUCT@64 deployed check **FLAT (+1.1 ns)**.
+
+**Two crank-level updates (2026-07-04, full entries in the log):**
+
+1. **The operator fuel gauge is RETIRED as a crank gate.** gen-6b_es
+   search measured ZERO margin over its own raw policy (K=16 −0.2 /
+   K=8 −3.4 ns) — and the corpus that very search generated still
+   trained a +5/+10 student. Play-strength margin ≠ target information;
+   candidate channels: value labels from stronger games, visit
+   distributions as variance-reduced self-distillation targets, corpus
+   volume (the 15-batch dose-response arm separates these).
+2. **Search no longer converts at the deployed config** — PUCT@64
+   washed out a +5/+10 raw edge (deployed-conversion trend: +3.5 →
+   +2.2 → +5.2 → +1.1). If the queued gen-7 PUCT@64-vs-raw probe reads
+   ≤ 0, deployment and the JTR calibration should submit RAW (~65×
+   cheaper per move).
+
+**NEXT: gen-8 crank — same recipe end-to-end, ~2.4 h/generation**
+(collect 64k ≈ 1.8 h + train 10k ≈ 37 min; stopping epoch now known, no
+calibration run). Queued arms (order + details → jass_sop.md):
+deployment probe, weight-decay arm (pipeline economics), 15-batch
+dose-response, JTR attn export + gen-7 POWERFUL calibration.
+
+## Previous snapshot (2026-07-03)
 
 **CHAMPION: gen-6b_es (`pv_gen6b_es_s128.msgpack`) — the first Step-4
 net: `PolicyValueNetAttn` (self-attention over the 36 card rows +
@@ -25,35 +56,9 @@ compress: the value-head upgrade converts to searched strength. Full arc
 (OOM → accum/data_parallel, overfit post-mortem, U-curve, interpretation
 corrections — notably: gen-6's "fuel exhaustion" was
 architecture-relative, the corpus held +10 the old net couldn't extract)
-in the experiment log, 2026-07-03 entries.
-
-**Operator re-probe (2026-07-04): the gauge reads ZERO** — gen-6b_es
-PUCT@128 vs own raw: K=16 −0.2 (p=0.92), K=8 −3.4 (p=0.11). The
-value-head upgrade lifted raw play past what its own search can improve
-on; "a better net re-opens Step 3" is refuted at every reachable
-sharpness. Per the standing fuel-gauge demotion this doesn't kill the
-gen-7 corpus — but it re-prices it: value-half + capacity, collected
-cheap.
-
-**gen-7 status (2026-07-04): 64k corpus collected** (gen-6b_es
-generator, K=8/sims=128; per-chip optimum B=8) **and full-log trained:
-eval-v floor ~0.113 (flat 7.5–11k), onset ~12k, 20k at 0.121.** Bigger
-corpus deepened the floor (0.1146→0.1129) and softened memorization
-(0.147→0.121 at 20k) but the U-minimum did not pass 20k — **early
-stopping stays** (at ~10k for 64k); weight decay remains the queued fix
-for stopping-epoch-free convergence.
-
-**NEXT: (1) early-stopped retrain to 10k → `pv_gen7_s128.msgpack`;
-(2) gate vs champion gen-6b_es** (raw-vs-raw ×2 seeds, PUCT@64 deployed
-check; both nets attn — single template again); **(3) optional
-dose-response arm:** retrain on 15 of the new batches (same holdout) to
-separate generator-strength from corpus-size effects. New cheap probe queued: gen-6b_es PUCT@64 vs raw — if
-search doesn't beat raw at the deployed config either, the JTR
-calibration should submit the raw policy. Also owed: attn support in
-the JTR export scripts (they hardcode `PolicyValueNet()`), then a
-gen-6b_es POWERFUL calibration.
-Training now runs on the 2×4 (`data_parallel=True`, ~20 s/100 epochs →
-7k in ~25 min). Owed-measurement details → jass_sop.md.
+in the experiment log, 2026-07-03 entries. (Superseded 2026-07-04:
+gen-7 promoted over gen-6b_es; the operator re-probe read ZERO and the
+fuel gauge is retired as a crank gate — see the current snapshot.)
 
 ## Previous snapshot (2026-07-02)
 

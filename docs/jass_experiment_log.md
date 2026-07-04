@@ -1057,3 +1057,33 @@ K=8/sims=128, temperature=1.0), one chip:
   wall-clock as the old 32k corpus (~180 s/batch × 16). At B=8/chip a
   2048-game batch is 32 pmap calls of 64 games (vs the old 4×512), so
   expect a little extra host-dispatch overhead on top of the ~160 s.
+
+## 2026-07-04 — gen-7 full-log train (64k corpus): U-curve bottom ~0.113 @ 7.5–11k, onset ~12k — bigger corpus helps, early stopping STAYS
+
+First train on the 64k corpus (gen-6b_es generator, K=8/sims=128,
+τ=1.0; 31 train batches × 2048, holdout = last batch, 76,334 positions).
+Fresh `PolicyValueNetAttn`, locked recipe, `data_parallel=True` (8
+devices), full 20k epochs with full logs; 4,463 s (~22 s/100).
+
+- **Eval v: floor 0.1129–0.1135, flat ~7.5k–11k** (min 0.1129 @ ~9.1k),
+  **overfit onset ~11.5–12k**, then a gentle climb: 0.115 @ 13k, 0.118 @
+  16k, **0.121 @ 20k**. Train loss falls throughout. Policy CE plateaus
+  at 0.9584 (NOT comparable to gen-6b's 0.9509 — different holdout and
+  generator entropy).
+- **vs gen-6b (15 batches, same architecture/recipe):** min 0.1146 →
+  0.1129 (~1.5% deeper); onset ~8k → ~12k; 20k damage 0.147 → 0.121.
+  Doubling the corpus bought a modest value-loss gain and much milder
+  memorization.
+- **Passes-per-batch hypothesis: REFUTED as a constant.** Predicted
+  onset at 530 passes × 31 ≈ 16.5k; observed ~12k ≈ 390 passes/batch.
+  More data delays overfit sublinearly, not at constant passes.
+- **DECISION criterion resolved: the U-minimum did NOT move past 20k →
+  early stopping does NOT retire.** It moves to ~10k for the 64k corpus
+  (was 7k at 32k). The weight-decay arm (hold the floor at convergence)
+  remains the principled fix, still queued.
+- **Next:** early-stopped retrain to 10k (mid-flat, fresh ckpt path) →
+  `pv_gen7_s128.msgpack` = the gen-7 candidate; gate vs champion
+  gen-6b_es (raw-vs-raw ×2 seeds, then PUCT@64 deployed check — both
+  nets attn, single template). Optional dose-response arm: retrain on
+  `batches[:15]` + same holdout (gen-6b's corpus size, gen-7's
+  generator) to separate generator-strength from corpus-size effects.

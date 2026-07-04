@@ -35,13 +35,19 @@ sharpness. Per the standing fuel-gauge demotion this doesn't kill the
 gen-7 corpus — but it re-prices it: value-half + capacity, collected
 cheap.
 
-**NEXT: gen-7 with a LARGER corpus (64k games, 2026-07-03 DECISION)** —
-the principled fix for the attn overfit, replacing early stopping;
-collect at the cheap baseline (K=8/sims=128 — sharpness buys nothing).
-Priced 2026-07-04: per-chip optimum B=8 (knee moved 8× for the attn
-generator, ms/game only ~9% worse) → **64k ≈ 1.4 h on the 2×4**.
-Weight decay / dropout are fallback arms if a big corpus
-still overfits. New cheap probe queued: gen-6b_es PUCT@64 vs raw — if
+**gen-7 status (2026-07-04): 64k corpus collected** (gen-6b_es
+generator, K=8/sims=128; per-chip optimum B=8) **and full-log trained:
+eval-v floor ~0.113 (flat 7.5–11k), onset ~12k, 20k at 0.121.** Bigger
+corpus deepened the floor (0.1146→0.1129) and softened memorization
+(0.147→0.121 at 20k) but the U-minimum did not pass 20k — **early
+stopping stays** (at ~10k for 64k); weight decay remains the queued fix
+for stopping-epoch-free convergence.
+
+**NEXT: (1) early-stopped retrain to 10k → `pv_gen7_s128.msgpack`;
+(2) gate vs champion gen-6b_es** (raw-vs-raw ×2 seeds, PUCT@64 deployed
+check; both nets attn — single template again); **(3) optional
+dose-response arm:** retrain on 15 of the new batches (same holdout) to
+separate generator-strength from corpus-size effects. New cheap probe queued: gen-6b_es PUCT@64 vs raw — if
 search doesn't beat raw at the deployed config either, the JTR
 calibration should submit the raw policy. Also owed: attn support in
 the JTR export scripts (they hardcode `PolicyValueNet()`), then a

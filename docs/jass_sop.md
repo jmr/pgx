@@ -151,13 +151,16 @@ it needs `PolicyValueNetAttn().apply`; a `PolicyValueNet` template
 silently mangles the params. Gate cells against older generations need
 TWO model instances.
 
-- **The attn recipe (until the weight-decay arm lands): 7,000 epochs,
-  NOT 20k** — the architecture overfits from ~8k (eval-v U-curve bottoms
-  ~0.115 at 6.0–7.6k; 20k lands at 0.147 and gates flat). Everything
-  else per Stage 2, plus `model=PolicyValueNetAttn()` and
-  `data_parallel=True`. Training-health check for attn: eval v ≈
-  0.115 ± 0.002 at 7k (the old 0.13–0.14 band is the *old architecture's*
-  level).
+- **The attn recipe (until the weight-decay arm lands): EARLY-STOP at
+  the corpus-size-dependent U-minimum, NOT 20k.** Measured: 15 train
+  batches → stop at 7k (flat 6.0–7.6k, floor ~0.115; 20k lands 0.147);
+  31 train batches → stop at 10k (flat 7.5–11k, floor ~0.113; 20k lands
+  0.121). Onset scales sublinearly with corpus (NOT constant
+  passes-per-batch — measured 2026-07-04), so for a new corpus size run
+  full logs once and read the flat region. Everything else per Stage 2,
+  plus `model=PolicyValueNetAttn()` and `data_parallel=True`.
+  Training-health check for attn: eval v at the floor ≈ 0.113–0.115
+  (the old 0.13–0.14 band is the *old architecture's* level).
 **OWED gen-6b_es measurements (in order):**
 
 1. ~~Operator re-probe~~ **DONE 2026-07-04: gauge reads ZERO** — K=16
@@ -177,7 +180,12 @@ TWO model instances.
    attn support in the export scripts (they hardcode `PolicyValueNet()`).
 
 **gen-7 DECISION (2026-07-03): collect a LARGER corpus — the principled
-fix for the attn overfit, replacing early stopping.** Overfit onset was
+fix for the attn overfit, replacing early stopping.**
+**RESOLVED 2026-07-04: helps but does not replace early stopping** —
+the 64k full-log run bottomed at ~0.113 (flat 7.5–11k, onset ~12k, 20k
+at 0.121): the U-minimum did not move past 20k, so early stopping stays
+(at 10k for 64k) and the weight-decay arm remains queued. Original
+rationale kept for the record: overfit onset was
 ~8k epochs ≈ ~530 passes over each of the 15 train batches; doubling to
 **32 batches × 2048 = 64k games** halves passes-per-epoch and feeds the
 spare capacity — and the value head benefits from more games regardless

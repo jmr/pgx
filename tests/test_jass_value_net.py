@@ -374,6 +374,32 @@ def test_pv_train_model_weight_decay_and_optimizer_conflict():
                        batch_size=4, num_epochs=1, print_every=100)
 
 
+def test_pv_train_model_snapshots(tmp_path):
+    """snapshot_every keeps params-only .ep{N} files; the epoch-N
+    snapshot equals a fresh N-epoch run (same RNG stream), so an
+    early-stopped net is a file copy, not a retrain."""
+    import flax.serialization
+
+    ckpt = str(tmp_path / "pv_snap_ckpt.msgpack")
+    p4, _ = train_pv_model(batch_size=4, num_epochs=4, print_every=100,
+                           checkpoint_path=ckpt, checkpoint_every=100,
+                           snapshot_every=2)
+    with open(ckpt + ".ep4", "rb") as f:
+        snap4 = flax.serialization.from_bytes(p4, f.read())
+    assert _params_equal(snap4, p4)
+
+    p2, _ = train_pv_model(batch_size=4, num_epochs=2, print_every=100)
+    with open(ckpt + ".ep2", "rb") as f:
+        snap2 = flax.serialization.from_bytes(p2, f.read())
+    assert _params_equal(snap2, p2)
+
+
+def test_pv_snapshot_requires_checkpoint_path():
+    with pytest.raises(ValueError, match="snapshot_every"):
+        train_pv_model(batch_size=4, num_epochs=2, print_every=100,
+                       snapshot_every=1)
+
+
 def test_pv_train_model_attn(tmp_path):
     """train_pv_model(model=PolicyValueNetAttn()) trains and resumes."""
     ckpt = str(tmp_path / "pv_attn_ckpt.msgpack")

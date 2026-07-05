@@ -160,8 +160,12 @@ need TWO model instances.
   31 train batches → stop at 10k (flat 7.5–11k, floor ~0.113; 20k lands
   0.121). Onset scales sublinearly with corpus (NOT constant
   passes-per-batch — measured 2026-07-04), so for a new corpus size run
-  full logs once and read the flat region. Everything else per Stage 2,
-  plus `model=PolicyValueNetAttn()` and `data_parallel=True`.
+  full logs once and read the flat region — **with `snapshot_every=500`
+  (knob landed 2026-07-05): keeps params-only `.ep{N}` files next to
+  the checkpoint, so the early-stopped net is a file copy off the
+  calibration run instead of a ~36 min retrain** (the gen-8 Arm A run
+  predated this and owed exactly that retrain). Everything else per
+  Stage 2, plus `model=PolicyValueNetAttn()` and `data_parallel=True`.
   Training-health check for attn: eval v at the floor ≈ 0.113–0.115
   (the old 0.13–0.14 band is the *old architecture's* level).
 **Queued work (order decided end-of-session 2026-07-04):**

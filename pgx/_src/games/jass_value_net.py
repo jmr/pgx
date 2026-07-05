@@ -609,6 +609,7 @@ def train_pv_model(
     seed: int = 0,
     checkpoint_path: str = None,
     checkpoint_every: int = 100,
+    snapshot_every: int = None,
 ) -> tuple:
     """Train a PolicyValueNet from scratch on self-play data.
 
@@ -679,6 +680,14 @@ def train_pv_model(
         checkpoint_path: As in train_model (slot files, resume replays
             the RNG stream; same collect_fn / hyperparameters assumed).
         checkpoint_every: Checkpoint interval in epochs.
+        snapshot_every: If set, every N epochs ALSO write a params-only
+            snapshot to f"{checkpoint_path}.ep{epoch}" — never
+            overwritten (unlike the two alternating checkpoint slots),
+            so a full-log calibration run keeps its U-region nets and
+            the early-stopped net is a file copy instead of a fresh
+            retrain. Load template-free via msgpack_restore, or
+            from_bytes with a params template. Requires
+            checkpoint_path.
 
     Returns:
         (params, model) — trained Flax parameters and the model instance.
@@ -697,6 +706,9 @@ def train_pv_model(
         raise ValueError(
             "weight_decay and optimizer are mutually exclusive: the "
             "explicit optimizer would silently ignore weight_decay")
+    if snapshot_every is not None and checkpoint_path is None:
+        raise ValueError("snapshot_every requires checkpoint_path "
+                         "(snapshots are written next to the checkpoint)")
     if optimizer is None:
         optimizer = (optax.adamw(lr, weight_decay=weight_decay,
                                  mask=decay_mask)
@@ -760,6 +772,10 @@ def train_pv_model(
             ck_params, ck_opt_state = unrep((params, opt_state))
             _save_checkpoint(checkpoint_path, ck_params, ck_opt_state,
                              epoch + 1, slot=(epoch + 1) // checkpoint_every)
+
+        if snapshot_every is not None and (epoch + 1) % snapshot_every == 0:
+            with open(f"{checkpoint_path}.ep{epoch + 1}", "wb") as f:
+                f.write(flax.serialization.to_bytes(unrep(params)))
 
     return unrep(params), model
 

@@ -1369,3 +1369,57 @@ B=gen-7, 300 pairs/seed. Nets fingerprinted distinct first.
   is exhausted. Same raw-vs-raw gate vs gen-7. If 8c_wd also washes, the
   recipe/corpus isn't producing a gen-7→8 climb and the question moves
   to fuel (bigger corpus) over regularization.
+
+## 2026-07-05 — gen-8c_wd (weight decay 1e-2, full 20k) raw gate vs gen-7: WASH — NOT promoted; BOTH gen-8 arms fail, gen-7 stays champion
+
+Stage 3 gate, same setup (raw-vs-raw temp 0.05, A=gen-8c_wd / B=gen-7,
+300 pairs/seed, fingerprints distinct).
+
+- **Seed 0: mean +0.1, t=0.031, p=0.9752** (dead null).
+- **Seed 2: mean −1.3, t=−0.738, p=0.4612** (null, wrong sign).
+- **Verdict: FAIL — more decisively null than 8b_es.** Weight decay
+  does not clear gen-7 either.
+
+**gen-8 is CLOSED as a regularization play. Both arms wash.** ES-only
+(8b_es) and WD (8c_wd), each trained on the fresh gen-7-generated 64k
+corpus, are indistinguishable from gen-7 on the raw gate. Regularization
+only governs the value-head U-curve (a gate wash every generation); it
+was never going to move the policy, and the policy is what the gate
+reads.
+
+**The real finding: a same-size self-distillation round is a FIXED
+POINT at gen-7.** New teacher, same corpus size (64k), fresh net →
+zero raw-gate gain. This is the operator-gauge-ZERO situation made
+concrete: perfect-info PUCT@128 no longer beats gen-7's raw policy
+(gauge ZERO since gen-6b_es; gen-7 PUCT@64 measured −6.3 vs its own
+raw), so the distillation targets ≈ the current raw policy, and
+iterating reproduces the champion. The AlphaZero improvement operator
+(search stronger than raw) has stalled internally — no gradient pulls
+the net forward from self-play.
+
+**What the levers look like now:**
+- **More fuel (>64k corpus):** the fuel that worked gen-6→7 was
+  CONFOUNDED with the architecture jump; on a pure same-arch round it
+  just wash-tested. More of the same fixed-point targets won't move the
+  policy — it only feeds the value head (gate wash). Low expected value
+  for the raw gate.
+- **Re-open the operator:** the 2026-07-03 sharpening probe found NO
+  search axis (sims/determinizations/PUCT-c) re-opens the perfect-info
+  gauge. If that holds, self-play distillation is saturated.
+- **Net capacity / architecture:** the last real climb (gen-6b_es,
+  +10/+7) WAS an architecture jump (attn). Step-4 value-head/net scaling
+  is the standing candidate to add extractable capacity.
+- **External headroom is REAL:** JTR arena has gen-7 raw −8.5 and even
+  cheating-raw −7.5 vs POWERFUL (2026-07-05) — the raw policy genuinely
+  is the gap. The improvement signal exists; the internal self-play loop
+  just can't see it because its own teacher is exhausted. A teacher that
+  produces targets stronger than the current raw policy (stronger/
+  different search, or POWERFUL-style targets) is what would re-open the
+  loop.
+
+**DECISION PENDING (2026-07-05): gen-9 direction.** Not "bigger corpus"
+by default — that was scoped when the fixed-point wasn't yet
+established. Candidates: (a) net-capacity scaling; (b) a stronger
+perfect-info teacher to re-open the operator; (c) the deferred
+dose-response arm is now mainly an economics probe (can we SHRINK
+corpus for free?), not a strength lever. Think before cranking.

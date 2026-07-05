@@ -209,9 +209,27 @@ need TWO model instances.
    run. Success: holdout v holds the floor at 20k with the
    seen-vs-holdout gap closed. ⚠ adamw opt_state ≠ adam's: don't resume
    an adam checkpoint with weight_decay set (or vice versa).
-4. Optional: **15-batch dose-response arm** (`batches[:15]` + same
-   holdout — gen-6b's corpus size with gen-7's generator) to separate
-   corpus-volume from target-quality channels in the gen-7 climb.
+4. **15-batch dose-response arm — UPGRADED from optional 2026-07-05:
+   it now carries the corpus-size DECISION.** The crank objective is
+   points gained per wall-clock hour, and 32×2048 collection is the
+   dominant round cost. Round model (attn generator: PUCT collect
+   177 s/2048-batch measured 2026-07-05, ES train 20 s/100 epochs,
+   gate ≈10 min, human overhead ≈30 min/round):
+   **64k ≈ 2.8 h/round, 32k ≈ 1.8 h, 16k ≈ 1.4 h** — so 64k must gain
+   ≥ ~1.5× more per round than 32k to pay its way (32k vs 16k:
+   ≥ ~1.3×). Cross-round evidence says it doesn't (gen-7's 64k gained
+   +5.2/+10.2 vs the 32k generations' +10–16; floor 0.113 vs 0.115)
+   but is CONFOUNDED (gen-6b_es's climb included the architecture
+   jump). The clean measurement is this arm: train a student on the
+   gen-7 corpus `batches[:15]` + the same holdout, gate vs the
+   31-batch student — zero new collection, ~1 h. If ≈flat → **drop
+   the standard corpus to 16×2048** (~1.5× the rounds/hour);
+   optionally bracket with a `batches[:8]` arm (below 16k the ~40 min
+   fixed cost dominates — don't shrink further). Interactions: if the
+   gen-8 raw arm wins, collection is ~65× cheaper and only the
+   train-time term still scales with size; the weight-decay arm
+   removes the per-size ES-calibration tax (~1.5 h per NEW size) that
+   otherwise penalizes changing corpus size at all.
 
 **gen-7 DECISION (2026-07-03): collect a LARGER corpus — the principled
 fix for the attn overfit, replacing early stopping.**

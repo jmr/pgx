@@ -1347,3 +1347,25 @@ data_parallel over the 2×4, full 20k with full logs, NO decay.
   `num_epochs=10_000` retrain per the standing procedure; Arm B =
   same call + `weight_decay=1e-2`, `num_epochs=20_000`, fresh GEN=
   checkpoint name (adamw opt_state ≠ adam's).
+
+## 2026-07-05 — gen-8b_es (Arm A-ES, no WD, ES @10k) raw gate vs gen-7: WASH — NOT promoted; gen-7 stays champion
+
+Stage 3 progress gate, raw-vs-raw (temperature=0.05), A=gen-8b_es /
+B=gen-7, 300 pairs/seed. Nets fingerprinted distinct first.
+
+- **Seed 0: mean +2.3, t=1.49, p=0.1362** (not significant).
+- **Seed 2: mean −0.6, t=−0.39, p=0.6963** (null, wrong sign).
+- **Verdict: FAIL.** Promote requires both seeds significant p<0.05,
+  same sign; here the seeds don't even agree in direction. Early-
+  stopping-only on the fresh gen-7 corpus does not clear gen-7.
+- Consistent with the train log read: the eval-v floor shifted DOWN
+  ~0.002 (0.111 vs 0.113), i.e. a marginally better value head, but
+  policy CE converged to the same ~0.958 soft floor as gen-7 — and the
+  raw gate reads the **policy**, so a flat policy floor → flat gate.
+  The value gain is real but not gateable (value head is a wash every
+  gen, standing result).
+- **Next: gen-8c_wd** (`weight_decay=1e-2`, `num_epochs=20_000`, fresh
+  checkpoint name) is now the live gen-8 candidate — the ES-only recipe
+  is exhausted. Same raw-vs-raw gate vs gen-7. If 8c_wd also washes, the
+  recipe/corpus isn't producing a gen-7→8 climb and the question moves
+  to fuel (bigger corpus) over regularization.

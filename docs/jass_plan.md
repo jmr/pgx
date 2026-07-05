@@ -562,6 +562,18 @@ Levers, **REORDERED by the measurement** (batch-fix first, then chips):
   It directly targets JassTheRipper's known weakness. Verify with a targeted
   arena where only the trump decision differs.
 
+**DECISION (2026-07-05): NO JTR games in the training mix — self-play
+only.** Tempting once the external gap closed to zero, but rejected:
+(1) JTR is the only external benchmark; training on its games converts
+"ties POWERFUL" from a generalization result into eval-on-train.
+(2) The whole bet is AlphaZero-style generality — beating JTR without
+ever seeing it should transfer to stronger/other engines (JTR++, KUS),
+while a policy tuned on JTR's specific conventions (rule-based trump,
+rollout-shaped lines) inherits its blind spots. (3) Data economics:
+JTR games cost ~seconds each in Java vs ~ms in pgx self-play.
+Revisit only if a dedicated held-out external opponent exists AND
+self-play has demonstrably plateaued against it.
+
 **Result (2026-06-20; full entry in the experiment log):** gen-3 exported
 (Flax → TF SavedModel) and JTR integrated with real PUCT priors +
 summed-visit aggregation; **gen-3 > gen-2 reproduces externally** (the old

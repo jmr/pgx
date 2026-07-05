@@ -170,8 +170,10 @@ need TWO model instances.
    (gap to POWERFUL = ZERO) + raw arena (`--pgx-raw`, JTR change
    `qzzrmuqy`): externally PUCT > raw +10.15 and raw < POWERFUL
    −8.5 — deploy-raw is HARNESS-SCOPED (internal gates raw, external
-   submissions PUCT; log entries 2026-07-05). Optional leftover:
-   `--cheating` raw-vs-POWERFUL diagnostic (flag not yet exposed).
+   submissions PUCT; log entries 2026-07-05). Cheating-raw diagnostic
+   DONE: perfect-info raw still −7.5, so the gap is the raw policy
+   itself (likely a search-budget effect — JTR ≈ 2,880 sims/move vs
+   the internal probes' 64–128), not marginalization.
    Original export scope (surveyed 2026-07-04, landed b942b68a):
    - `scripts/extract_pv_weights.py` hardcodes `PolicyValueNet()` at
      `model = PolicyValueNet()` — needs an `--arch` flag or template-free

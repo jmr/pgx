@@ -1281,3 +1281,43 @@ Optional diagnostic still queued: `--cheating` raw vs POWERFUL
 config; needs a CLI flag) to split the −8.5 into
 imperfect-info-marginalization cost vs genuine raw-policy weakness
 against classical opponents.
+
+## 2026-07-05 — Cheating-raw diagnostic: perfect-info raw STILL loses to POWERFUL −7.5 — the marginalization hypothesis is REFUTED; the raw policy itself is the gap
+
+gen-7 raw with `--cheating` (single forward pass on the TRUE hands —
+exactly the pgx-internal raw config; JTR change `yovnospt`) vs
+classical POWERFUL, 250 pairs / 500 games, seed 42:
+
+**−15.0/pair (−7.5/game), t=−4.99, p<0.0001, sign 86W-156L-8T** —
+nearly identical to fair (determinized) raw's −8.5/game.
+
+- **The marginalization hypothesis from the match-1 entry is
+  REFUTED**: giving raw the true state recovers only ~1 pt of the
+  ~8.5-pt gap. Determinization-averaging is nearly free (also
+  evidence the 45-world averaging implementation is sound — it
+  tracks the true-state policy closely). The gen-7 raw policy is
+  simply ~7.5/game weaker than POWERFUL's search, even with perfect
+  information.
+- **Where PUCT's +10.15 comes from, revised: the search process
+  itself — and note the BUDGET asymmetry.** The internal "search
+  hurts" probe (−6.3) ran 64 TOTAL sims; JTR's SWEEP_64 runs 64
+  sims/det × 45 dets ≈ 2,880 expansions/move with root aggregation
+  across worlds. The entire internal own-search-margin trendline
+  (+26 → +11 → +3 → −6.3) was measured at 64–128 total sims. So the
+  internal and external findings likely reconcile as a
+  search-BUDGET effect, not an information effect: tiny searches
+  now hurt (net's argmax is better), large determinized searches
+  still help a lot.
+- **Reading for internal gates:** raw-vs-raw progress gates remain
+  valid as RELATIVE progress measures, but this shows self-play
+  raw strength does not translate 1:1 into absolute strength vs an
+  out-of-distribution classical opponent — the same caution the
+  gen-3-era results raised. External absolute strength currently
+  REQUIRES the search wrapper; the value head at 2,880-sim scale is
+  doing real work (the "search exits the loop" narrative is
+  internal-only, and specifically small-budget-internal only).
+- Not re-opened here (standing DECISION): the internal search axis
+  at collection. But if a cheap internal probe is ever wanted, the
+  discriminating experiment is internal PUCT at a JTR-scale budget
+  (~2–3k sims) vs raw — it would separate "budget" from
+  "harness/opponent" cleanly.

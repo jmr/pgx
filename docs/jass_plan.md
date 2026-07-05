@@ -48,9 +48,13 @@ significant)**; PUCT@64 deployed check **FLAT (+1.1 ns)**.
    retired (the raw gate covers deployed strength). **But in JTR's
    imperfect-info harness the sign FLIPS: gen-7 PUCT beats gen-7 raw
    +10.15 (p<0.0001), and raw loses to POWERFUL −8.5 where PUCT
-   ties** — raw must marginalize over hidden hands by naive policy
-   averaging while determinized PUCT does real information-set
-   reasoning. JTR/external submissions stay PUCT (log, 2026-07-05).
+   ties. Cheating-raw diagnostic (same day): perfect-info raw STILL
+   loses −7.5 — the gap is the raw policy itself vs an OOD classical
+   opponent, not imperfect-info marginalization. Likely
+   reconciliation is search BUDGET: internal probes used 64–128
+   total sims, JTR's SWEEP_64 ≈ 2,880 expansions/move across 45
+   worlds.** JTR/external submissions stay PUCT (log, 2026-07-05);
+   external absolute strength currently requires the search wrapper.
    Open crank question: gen-8's teacher has NEGATIVE play margin
    (internally) — the queued raw-corpus arm tests whether visit
    distributions still carry signal (if not, Stage 1 collapses from
@@ -60,9 +64,9 @@ significant)**; PUCT@64 deployed check **FLAT (+1.1 ns)**.
 **NEXT: (1) gen-8 crank.** The JTR arena chapter is CLOSED for now:
 export, PUCT calibration (ties POWERFUL) and raw arena all done
 2026-07-05 — external deployed config is PUCT, internal stays raw
-(harness-scoped DECISION, see crank update 2). Optional leftover: a
-`--cheating` raw-vs-POWERFUL diagnostic to split the external raw
-gap (marginalization cost vs OOD-opponent weakness).
+(harness-scoped DECISION, see crank update 2); the `--cheating`
+diagnostic resolved the external raw gap as the policy itself, not
+marginalization (refuted — log 2026-07-05).
 So next is **gen-8 as a raw-vs-PUCT corpus A/B**, raw arm
 first (~45 min end-to-end; if its student gates flat vs gen-7, fall
 back to the standard PUCT collection — nothing lost). Then: weight-decay

@@ -200,10 +200,15 @@ need TWO model instances.
    - PUCT arm per the standard recipe (~1.8 h collect) if needed, or as
      an optional head-to-head (A-student vs B-student) to measure the
      target-sharpening channel directly.
-3. **Weight-decay arm** (`optimizer=optax.adamw(3e-4, weight_decay=1e-2)`,
-   passthrough landed 2026-07-03): pipeline economics — retire the
-   per-corpus-size full-log calibration run. Success: holdout v holds
-   the floor at 20k with the seen-vs-holdout gap closed.
+3. **Weight-decay arm** (`train_pv_model(..., weight_decay=1e-2)` —
+   first-class knob landed 2026-07-05: masked adamw, decay on
+   Dense/attention kernels ONLY, biases/LayerNorm/pool_query excluded
+   per the standard transformer recipe; supersedes the raw
+   `optimizer=optax.adamw(...)` passthrough, which decays everything):
+   pipeline economics — retire the per-corpus-size full-log calibration
+   run. Success: holdout v holds the floor at 20k with the
+   seen-vs-holdout gap closed. ⚠ adamw opt_state ≠ adam's: don't resume
+   an adam checkpoint with weight_decay set (or vice versa).
 4. Optional: **15-batch dose-response arm** (`batches[:15]` + same
    holdout — gen-6b's corpus size with gen-7's generator) to separate
    corpus-volume from target-quality channels in the gen-7 climb.
@@ -228,8 +233,8 @@ training cost is unchanged (one batch per step); only Stage-1 cost
 scales — hence the re-profile first. Do NOT pad with older generations'
 corpora (the gen-2 3-way-mix regression). Fallback arms if a big corpus
 still overfits: weight decay
-(`optimizer=optax.adamw(3e-4, weight_decay=1e-2)`, passthrough landed
-2026-07-03; success = holdout v ≤ 0.115 at 20k with the gap closed),
+(`train_pv_model(..., weight_decay=1e-2)`, masked-adamw knob landed
+2026-07-05; success = holdout v ≤ 0.115 at 20k with the gap closed),
 then dropout in the attention blocks / `num_layers=1`.
 - **Training on the 2×4: `train_pv_model(..., data_parallel=True)`**
   (landed 2026-07-03) — pmaps the train step over all local chips

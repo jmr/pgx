@@ -10,6 +10,7 @@ from pgx._src.games.jass_value_net import (
     PolicyValueNetAttn,
     _replicate,
     _shard_pv,
+    decay_mask,
     make_pv_train_step,
     train_model,
     train_pv_model,
@@ -324,6 +325,53 @@ def test_pv_train_model_optimizer_passthrough():
     logits, value = model.apply(params, jnp.zeros((2, 36, 12)),
                                 jnp.zeros((2, 20)))
     assert logits.shape == (2, 43)
+
+
+def test_decay_mask_kernels_only():
+    """decay_mask marks exactly the Dense/attention kernels for decay —
+    biases, LayerNorm scale/bias, and pool_query are excluded."""
+    model = PolicyValueNetAttn()
+    params = model.init(jax.random.PRNGKey(0),
+                        jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
+    flat, _ = jax.tree_util.tree_flatten_with_path(decay_mask(params))
+    seen = set()
+    for path, decayed in flat:
+        name = path[-1].key
+        seen.add(name)
+        assert decayed == (name == "kernel"), (path, decayed)
+    assert {"kernel", "bias", "scale", "pool_query"} <= seen
+
+
+def test_pv_train_model_weight_decay(tmp_path):
+    """weight_decay trains, shrinks kernels vs plain adam on the same
+    stream, and its adamw opt_state checkpoints/resumes."""
+    ckpt = str(tmp_path / "pv_wd_ckpt.msgpack")
+
+    p_adam, _ = train_pv_model(batch_size=4, num_epochs=4, print_every=100)
+    p_wd, model = train_pv_model(weight_decay=0.5, batch_size=4,
+                                 num_epochs=4, print_every=100)
+    logits, value = model.apply(p_wd, jnp.zeros((2, 36, 12)),
+                                jnp.zeros((2, 20)))
+    assert logits.shape == (2, 43)
+    # Same data/RNG stream, so any kernel-norm drop is the decay term.
+    def kernel_norm(p):
+        flat, _ = jax.tree_util.tree_flatten_with_path(p)
+        return sum(float(jnp.sum(v ** 2))
+                   for path, v in flat if path[-1].key == "kernel")
+    assert kernel_norm(p_wd) < kernel_norm(p_adam)
+
+    train_pv_model(weight_decay=0.5, batch_size=4, num_epochs=2,
+                   print_every=100, checkpoint_path=ckpt, checkpoint_every=2)
+    p_resumed, _ = train_pv_model(weight_decay=0.5, batch_size=4,
+                                  num_epochs=4, print_every=100,
+                                  checkpoint_path=ckpt, checkpoint_every=2)
+    assert _params_equal(p_wd, p_resumed)
+
+
+def test_pv_train_model_weight_decay_and_optimizer_conflict():
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        train_pv_model(weight_decay=1e-2, optimizer=optax.adam(3e-4),
+                       batch_size=4, num_epochs=1, print_every=100)
 
 
 def test_pv_train_model_attn(tmp_path):

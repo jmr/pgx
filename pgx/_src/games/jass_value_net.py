@@ -400,6 +400,17 @@ def make_pv_train_step(model: PolicyValueNet,
     return train_step if accum_steps == 1 else train_step_accum
 
 
+def decay_mask(params):
+    """Weight-decay mask for optax.adamw: decay Dense/attention kernels only.
+
+    Standard transformer recipe — biases, LayerNorm scale/bias, and the
+    learned pool_query are excluded (plain adamw would decay them all;
+    flagged when the optimizer passthrough landed, 2026-07-03).
+    """
+    return jax.tree_util.tree_map_with_path(
+        lambda path, _: getattr(path[-1], "key", None) == "kernel", params)
+
+
 # ── Training ──────────────────────────────────────────────────────────────────
 
 
@@ -589,6 +600,7 @@ def train_pv_model(
     num_epochs: int = 1000,
     lr: float = 3e-4,
     optimizer: optax.GradientTransformation = None,
+    weight_decay: float = 0.0,
     policy_weight: float = 1.0,
     accum_steps: int = 1,
     data_parallel: bool = False,
@@ -632,9 +644,19 @@ def train_pv_model(
         lr: Adam learning rate (also accepts an optax schedule). Ignored
             if optimizer is given.
         optimizer: Optional optax optimizer replacing the default
-            optax.adam(lr) — e.g. optax.adamw(3e-4, weight_decay=1e-2)
-            for regularization (the gen-6b overfit). ⚠ Checkpoints store
-            the optimizer state: resume with the same optimizer.
+            optax.adam(lr) — an escape hatch for nonstandard recipes;
+            for weight decay prefer the weight_decay knob below.
+            ⚠ Checkpoints store the optimizer state: resume with the
+            same optimizer.
+        weight_decay: If nonzero, train with optax.adamw(lr,
+            weight_decay=...) with decay masked to Dense/attention
+            kernels only (decay_mask): biases, LayerNorm params, and
+            the attn net's pool_query are excluded, per the standard
+            transformer recipe. The regularization arm for the attn
+            value-head overfit (gen-6b) — e.g. weight_decay=1e-2.
+            Mutually exclusive with optimizer. ⚠ The adamw opt_state
+            differs from adam's: resume checkpoints with the same
+            weight_decay setting.
         policy_weight: Weight of the policy cross-entropy in the loss
             (value MSE has weight 1).
         accum_steps: Gradient-accumulation microbatches per step (see
@@ -671,8 +693,14 @@ def train_pv_model(
         model = PolicyValueNet()
     key, k0 = jax.random.split(key)
     params = model.init(k0, jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
+    if weight_decay and optimizer is not None:
+        raise ValueError(
+            "weight_decay and optimizer are mutually exclusive: the "
+            "explicit optimizer would silently ignore weight_decay")
     if optimizer is None:
-        optimizer = optax.adam(lr)
+        optimizer = (optax.adamw(lr, weight_decay=weight_decay,
+                                 mask=decay_mask)
+                     if weight_decay else optax.adam(lr))
     opt_state = optimizer.init(params)
     n_dev = jax.local_device_count() if data_parallel else 1
     step_fn = make_pv_train_step(model, optimizer, policy_weight, accum_steps,

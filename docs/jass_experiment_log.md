@@ -1321,3 +1321,29 @@ nearly identical to fair (determinized) raw's −8.5/game.
   discriminating experiment is internal PUCT at a JTR-scale budget
   (~2–3k sims) vs raw — it would separate "budget" from
   "harness/opponent" cleanly.
+
+## 2026-07-05 — gen-8 Arm A full-log train (gen-7 corpus, 64k, no WD): U-curve floor ~0.111 @ 8–11.5k, onset ~12k — ES @10k; whole curve shifted DOWN ~0.002 vs gen-7's run
+
+Stage 2, gen-8 crank (scoped to the weight-decay comparison — SOP item
+3). Standard recipe on the fresh gen-7-generated corpus (32×2048 PUCT,
+K=8/sims=128; holdout 76,326 labeled positions), PolicyValueNetAttn,
+data_parallel over the 2×4, full 20k with full logs, NO decay.
+
+- **Eval-v U-curve: floor 0.1112–0.1116, flat ~8.2k–11.5k** (min
+  ≈0.1112 at ~9.8k and ~10.9k — noise-level distinction), **overfit
+  onset ~12k** (0.113 @13.5k, 0.115 @16k, ~0.120 @20k; train keeps
+  falling). Same shape and same ES epoch as gen-7's 64k run
+  (0.113 @ 7.5–11k, onset ~12k) — **ES @10k confirmed for Arm A-ES.**
+- **The curve sits ~0.002 below gen-7's run everywhere** (floor 0.111
+  vs 0.113): the gen-7-generated corpus trains a slightly better value
+  head than the gen-6b_es corpus did — teacher quality still shows up
+  in the labels even at fuel-gauge ZERO.
+- Policy CE clean as always: converges ~0.9585–0.9590 by ~10k, no
+  upturn through 20k. Value remains the only overfitting head.
+- **Arm B success bar is now concrete: holdout v ≤ ~0.111 at 20k with
+  the seen-vs-holdout gap closed** (this run's 20k lands 0.120).
+- Operational: the run's 10k checkpoint was overwritten by the resumed
+  10k→20k leg (slot files alternate) — Arm A-ES is a fresh
+  `num_epochs=10_000` retrain per the standing procedure; Arm B =
+  same call + `weight_decay=1e-2`, `num_epochs=20_000`, fresh GEN=
+  checkpoint name (adamw opt_state ≠ adam's).

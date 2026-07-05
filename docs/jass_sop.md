@@ -189,8 +189,13 @@ need TWO model instances.
      parity test vs `attn_model.apply` on random inputs.
    - Raw deployment means JTR only needs the POLICY head path verified,
      but export both heads (the SavedModel contract is shared).
-2. **Tomorrow: gen-8 crank as a raw-vs-PUCT corpus A/B** (gen-7
-   generator both arms, 64k each, same training recipe, ES @10k):
+2. **DEFERRED to gen-9 (2026-07-05): raw-vs-PUCT corpus A/B** — gen-8
+   is scoped to the weight-decay arm alone (item 3); collect gen-8 with
+   the standard PUCT recipe. Rationale: pipeline optimizations only pay
+   if many rounds remain, and the crank may stall soon — prove the
+   training-side fix first, optimize throughput after. Original A/B
+   design (gen-7 generator both arms, 64k each, same training recipe,
+   ES @10k):
    - **Raw arm FIRST** (~45 min end-to-end: raw τ=1.0 self-play collects
      64k in ~minutes — forward-only, ~65× cheaper; policy targets =
      one-hot own-sampled moves ≈ policy stays put, value channel live).
@@ -200,17 +205,40 @@ need TWO model instances.
    - PUCT arm per the standard recipe (~1.8 h collect) if needed, or as
      an optional head-to-head (A-student vs B-student) to measure the
      target-sharpening channel directly.
-3. **Weight-decay arm** (`train_pv_model(..., weight_decay=1e-2)` —
-   first-class knob landed 2026-07-05: masked adamw, decay on
-   Dense/attention kernels ONLY, biases/LayerNorm/pool_query excluded
-   per the standard transformer recipe; supersedes the raw
-   `optimizer=optax.adamw(...)` passthrough, which decays everything):
-   pipeline economics — retire the per-corpus-size full-log calibration
-   run. Success: holdout v holds the floor at 20k with the
-   seen-vs-holdout gap closed. ⚠ adamw opt_state ≠ adam's: don't resume
-   an adam checkpoint with weight_decay set (or vice versa).
-4. **15-batch dose-response arm — UPGRADED from optional 2026-07-05:
-   it now carries the corpus-size DECISION.** The crank objective is
+3. **THE gen-8 arm (scoped 2026-07-05): weight decay**
+   (`train_pv_model(..., weight_decay=1e-2)` — first-class knob landed
+   2026-07-05: masked adamw, decay on Dense/attention kernels ONLY,
+   biases/LayerNorm/pool_query excluded per the standard transformer
+   recipe; supersedes the raw `optimizer=optax.adamw(...)` passthrough,
+   which decays everything). The point of WD is to make the stopping
+   epoch a free choice — train to 20k with NO U-bend to hit; do NOT
+   combine ES+WD in one run (confounds the comparison, and if WD works
+   there is nothing to stop early for). gen-8 procedure:
+   - Collect the standard PUCT corpus (gen-7 generator, 32×2048,
+     K=8/sims=128).
+   - **Arm A (baseline):** full 20k WITHOUT decay, full logs — the
+     fresh-corpus overfitting look; its U-min defines the ES baseline
+     (floor + stopping epoch for this corpus).
+   - **Arm B:** full 20k WITH `weight_decay=1e-2`, full logs. Take the
+     20k net — or any epoch past where the holdout flattens, if 67 min
+     is worth trimming.
+   - **Arm A-ES — the REAL comparison point for WD:** retrain WITHOUT
+     decay, early-stopped at Arm A's U-min (the standing recipe's net
+     for this corpus).
+   - **Compare.** Proxy read: Arm B's holdout v at 20k vs A-ES's floor
+     (~0.113 band), seen-vs-holdout gap closed, no upturn. Decider:
+     **head-to-head raw arena, B-20k vs A-ES** — WD earns its keep
+     only by matching or beating the ES net it would replace. WD
+     wins/ties → gen-8 = B-20k, gate vs gen-7 (raw-vs-raw, two seeds,
+     as usual); ES + the per-corpus-size calibration run retire from
+     the recipe. WD loses → gen-8 = A-ES, gate vs gen-7; escalation:
+     dropout in the attn blocks, then num_layers=1.
+   ⚠ adamw opt_state ≠ adam's: don't resume an adam checkpoint with
+   weight_decay set (or vice versa) — separate GEN= checkpoint names
+   per arm.
+4. **DEFERRED to gen-9 (2026-07-05, same scoping call as item 2):
+   15-batch dose-response arm — upgraded from optional earlier the
+   same day: it carries the corpus-size DECISION.** The crank objective is
    points gained per wall-clock hour, and 32×2048 collection is the
    dominant round cost. Round model (attn generator: PUCT collect
    177 s/2048-batch measured 2026-07-05, ES train 20 s/100 epochs,

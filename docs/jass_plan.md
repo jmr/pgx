@@ -67,10 +67,16 @@ export, PUCT calibration (ties POWERFUL) and raw arena all done
 (harness-scoped DECISION, see crank update 2); the `--cheating`
 diagnostic resolved the external raw gap as the policy itself, not
 marginalization (refuted — log 2026-07-05).
-So next is **gen-8 as a raw-vs-PUCT corpus A/B**, raw arm
-first (~45 min end-to-end; if its student gates flat vs gen-7, fall
-back to the standard PUCT collection — nothing lost). Then: weight-decay
-arm, 15-batch dose-response (details → jass_sop.md).
+So next is **gen-8, scoped (2026-07-05) to the weight-decay arm
+alone**: standard PUCT collection (gen-7 generator, 32×2048), then two
+full-20k full-log runs on it — no-WD (the overfitting look; its U-min
+sets the ES epoch) vs `weight_decay=1e-2` (knob landed 2026-07-05,
+masked adamw), plus an ES-no-WD retrain at the U-min as the REAL
+comparison point: WD replaces ES only if WD@20k matches/beats the
+ES net head-to-head. The raw-vs-PUCT corpus A/B and
+the 15-batch dose-response / corpus-size decision are DEFERRED to
+gen-9 — pipeline optimization only pays if many rounds remain
+(details → jass_sop.md).
 
 ## Previous snapshot (2026-07-03)
 

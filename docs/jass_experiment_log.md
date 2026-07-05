@@ -1423,3 +1423,73 @@ established. Candidates: (a) net-capacity scaling; (b) a stronger
 perfect-info teacher to re-open the operator; (c) the deferred
 dose-response arm is now mainly an economics probe (can we SHRINK
 corpus for free?), not a strength lever. Think before cranking.
+
+## 2026-07-05 — CORRECTION: `num_simulations` is PER DETERMINIZATION — the "budget asymmetry" arithmetic was wrong; gen-9 option space framed + discriminating probe pre-registered
+
+Code check (`jass_puct.py::puct_search`: the K dets are the mctx batch,
+`num_simulations` runs per batch element — "Tree simulations per
+determinization" in the docstring): every internal budget quoted as
+"total sims" in the 2026-07-05 cheating-raw entry was off by a factor
+of K.
+
+- gen-7 deployed check PUCT@64 K=8 = **512 expansions/move** (not 64).
+- The sharpening probe's biggest arms (gen-5b: @256 K=8, @128 K=16) and
+  the gen-6b_es re-probe's live arm (K=16 @128) = **2,048
+  expansions/move**.
+- JTR SWEEP_64 = 64/det × 45 dets = **2,880 expansions/move**.
+
+So the gap between "internal gauge reads ZERO" (gen-6b_es K=16@128,
+−0.2) and "external search wins big" (gen-7 JTR, +10.15) is **1.4× in
+budget, not 45×** — the pure-budget reconciliation is under-determined.
+The genuinely un-probed axes at the attn generation:
+(a) **worlds** — K=45 vs 16 (K was the live axis in both internal
+    probes);
+(b) **the searcher itself** — JTR runs classical PUCT over all legal
+    actions with its own c/backup; internal is mctx Gumbel with
+    `max_num_considered_actions=16` acting on summed visit counts;
+(c) harness/opponent context.
+
+**gen-9 option space (resolves the DECISION PENDING above):**
+
+- **A. Re-open the operator with a JTR-mirror teacher.** Cheapest
+  discriminating step — probe pre-registered below. If internal search
+  at the JTR config beats gen-7 raw ≈ +8–10, gen-9 = collect at that
+  config (2.8× the K=8@128 collection budget → Stage 1 ~4 h at 64k,
+  less if the corpus shrinks — stronger targets should need fewer
+  games). If it reads ~0, budget/worlds do NOT re-open the operator
+  inside mctx-Gumbel; the JTR searcher/harness is the difference and
+  the options move to B/C (or importing a JTR-style searcher as
+  teacher).
+- **B. Net capacity scaling.** Bigger attn trunk/heads trained on the
+  EXISTING 64k gen-7 corpus — zero collection cost, pure train + gate.
+  Precedent: gen-6b_es (+10/+7) extracted signal from a corpus that had
+  gated flat twice for the old net. Risk: unlike gen-6b, today's
+  targets ≈ the champion's raw policy (fixed point), so capacity may
+  just reproduce gen-7 with more parameters; the ~0.9585 policy-CE
+  floor may be target entropy, not a capacity limit. Cheap to falsify,
+  and per the sharpening-probe DECISION a materially better net is
+  itself what re-opens the search axes.
+- **C. Better small-budget targets (Gumbel knobs).** The searcher is
+  already `mctx.gumbel_muzero_policy` (improvement-guarantee machinery
+  in place); unexplored: `max_num_considered_actions` 16 → wider, and
+  training on the completed-Q `action_weights` output instead of raw
+  summed visit counts (the current pi). Fallback if A washes or its
+  economics hurt.
+- **Ruled out:** more same-recipe fuel (fixed-point targets in greater
+  volume), more regularization (gen-8 closed it), JTR/POWERFUL games as
+  targets (standing DECISION, 2026-07-05), Step-5 imperfect-info work
+  (addresses external raw strength, not the internal climb).
+
+**Pre-registered probe (the Option-A discriminator):** gen-7 PUCT
+(greedy) vs gen-7 raw (τ=0.05), `policy_match`, on the 2×4 with one
+chunk per chip (`jax.pmap`, SOP probe-parallelization TODO now done),
+8 pairs/chip × 8 chips × 5 seed rounds = 320 pairs/arm:
+
+| arm | expansions/move | question |
+|:--|:--|:--|
+| K=45 × 64 | 2,880 | JTR mirror — does the external config win internally? |
+| K=16 × 128 | 2,048 | anchor — replicate gen-6b_es's −0.2 on gen-7 |
+| K=8 × 360 | 2,880 | worlds-vs-depth control (decisive only if arm 1 re-opens) |
+
+Predictions: budget/worlds hypothesis → arm 1 ≈ +8–10 with arm 3
+lagging it; searcher/harness hypothesis → all arms ≈ 0.

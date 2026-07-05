@@ -123,13 +123,31 @@ pool: `np.concatenate([policy_match(a, b, PRNGKey(s), 80) for s in range(3)])`
 → 240 pairs at the memory cost of 80, and interruptible between chunks. (Raw
 `policy_match` is cheap and safe at 300.)
 
-**TODO — parallelize probe chunks across TPU chips.** With the attn net
-the seed-looped probes are no longer "minutes on CPU": the gen-6b_es
-K=16 @128 arm ran ~70 s/chunk × 12 chunks (~14 min/arm), single-device —
-`policy_match` is plain `jit`+`vmap`, no pmap/sharding. On a 2×4 runtime
-it uses 1 of 8 chips; distributing the seed chunks across devices
-(`jax.device_put` params per device, round-robin chunks) is ~8× without
-touching `policy_match` itself. Worth doing before the next probe sweep.
+**Parallelize probe chunks across TPU chips (recipe, 2026-07-05).**
+`policy_match` is plain `jit`+`vmap` — single device. On a 2×4, run one
+chunk per chip with `pmap`; the pair chunk plays the role of the old
+seed chunk (8 pairs/chip × 8 chips × 5 rounds = 320 pairs at the memory
+cost of 8). Build the action fns INSIDE the pmapped fn from its params
+argument — closing over host params would bake them in as constants:
+
+```python
+def make_chunk_fn(K, sims, pairs_per_chip):
+    def run_chunk(params, key):
+        puct = make_puct_action_fn(attn_model.apply, params,
+                                   num_determinizations=K,
+                                   num_simulations=sims)   # greedy
+        raw = make_policy_action_fn(attn_model.apply, params,
+                                    temperature=0.05)
+        return policy_match(puct, raw, key, pairs_per_chip)
+    return jax.pmap(run_chunk, in_axes=(None, 0))
+
+# per round: chunk_fn(src_params, jax.random.split(PRNGKey(seed), 8))
+# → (8, 2*pairs_per_chip), pair-adjacent per chip; reshape(-1) and pool.
+```
+
+(The old CPU guidance — seed-loop at ≤80 pairs, never raise
+`num_pairs` — still applies to single-device runs; the gen-6b_es
+K=16 @128 arm ran ~70 s/chunk × 12 chunks single-device.)
 
 Diagnostics:
 
@@ -154,7 +172,8 @@ needs `PolicyValueNetAttn().apply`; a `PolicyValueNet` template
 silently mangles the params. Gate cells against pre-attn generations
 need TWO model instances.
 
-- **The attn recipe (until the weight-decay arm lands): EARLY-STOP at
+- **The attn recipe (standing; weight decay SHELVED 2026-07-05 — both
+  gen-8 arms gated WASH vs gen-7): EARLY-STOP at
   the corpus-size-dependent U-minimum, NOT 20k.** Measured: 15 train
   batches → stop at 7k (flat 6.0–7.6k, floor ~0.115; 20k lands 0.147);
   31 train batches → stop at 10k (flat 7.5–11k, floor ~0.113; 20k lands
@@ -170,14 +189,21 @@ need TWO model instances.
   (the old 0.13–0.14 band is the *old architecture's* level).
 **Queued work (order decided end-of-session 2026-07-04):**
 
+0. **NEXT (2026-07-05): gen-9 direction probe** — gen-8 closed as a
+   fixed point at gen-7 (both arms wash); the option space (A:
+   JTR-mirror teacher / B: capacity / C: Gumbel target knobs) and the
+   pre-registered three-arm probe (gen-7 PUCT K=45×64 / K=16×128 /
+   K=8×360 vs gen-7 raw, pmap'd over the 2×4, 320 pairs/arm) are in
+   the log's 2026-07-05 correction entry and the plan's NEXT block.
 1. **DONE 2026-07-05: JTR arena chapter.** Export + PUCT calibration
    (gap to POWERFUL = ZERO) + raw arena (`--pgx-raw`, JTR change
    `qzzrmuqy`): externally PUCT > raw +10.15 and raw < POWERFUL
    −8.5 — deploy-raw is HARNESS-SCOPED (internal gates raw, external
    submissions PUCT; log entries 2026-07-05). Cheating-raw diagnostic
    DONE: perfect-info raw still −7.5, so the gap is the raw policy
-   itself (likely a search-budget effect — JTR ≈ 2,880 sims/move vs
-   the internal probes' 64–128), not marginalization.
+   itself (JTR ≈ 2,880 expansions/move vs the internal probes'
+   512–2,048 — sims are per-det, correction in the log 2026-07-05),
+   not marginalization.
    Original export scope (surveyed 2026-07-04, landed b942b68a):
    - `scripts/extract_pv_weights.py` hardcodes `PolicyValueNet()` at
      `model = PolicyValueNet()` — needs an `--arch` flag or template-free
@@ -209,7 +235,11 @@ need TWO model instances.
    - PUCT arm per the standard recipe (~1.8 h collect) if needed, or as
      an optional head-to-head (A-student vs B-student) to measure the
      target-sharpening channel directly.
-3. **THE gen-8 arm (scoped 2026-07-05): weight decay**
+3. **DONE 2026-07-05 — WASH, WD shelved. The gen-8 arm: weight decay.**
+   Both gen-8 nets (8b_es = Arm A-ES, 8c_wd = Arm B) gated WASH vs
+   gen-7 (raw gate, two seeds each; log 2026-07-05) — the planned
+   B-vs-A-ES head-to-head is moot when neither clears the champion.
+   ES stays the recipe. Original procedure kept for the record:
    (`train_pv_model(..., weight_decay=1e-2)` — first-class knob landed
    2026-07-05: masked adamw, decay on Dense/attention kernels ONLY,
    biases/LayerNorm/pool_query excluded per the standard transformer

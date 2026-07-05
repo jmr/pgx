@@ -50,10 +50,12 @@ significant)**; PUCT@64 deployed check **FLAT (+1.1 ns)**.
    +10.15 (p<0.0001), and raw loses to POWERFUL −8.5 where PUCT
    ties. Cheating-raw diagnostic (same day): perfect-info raw STILL
    loses −7.5 — the gap is the raw policy itself vs an OOD classical
-   opponent, not imperfect-info marginalization. Likely
-   reconciliation is search BUDGET: internal probes used 64–128
-   total sims, JTR's SWEEP_64 ≈ 2,880 expansions/move across 45
-   worlds.** JTR/external submissions stay PUCT (log, 2026-07-05);
+   opponent, not imperfect-info marginalization. (Budget arithmetic
+   CORRECTED 2026-07-05, see the log: `num_simulations` is per
+   determinization, so internal probes ran 512–2,048
+   expansions/move, not 64–128; JTR's SWEEP_64 ≈ 2,880 differs
+   mainly in WORLDS — 45 vs 8–16 — and the searcher, not raw
+   budget.)** JTR/external submissions stay PUCT (log, 2026-07-05);
    external absolute strength currently requires the search wrapper.
    Open crank question: gen-8's teacher has NEGATIVE play margin
    (internally) — the queued raw-corpus arm tests whether visit
@@ -61,22 +63,31 @@ significant)**; PUCT@64 deployed check **FLAT (+1.1 ns)**.
    ~1.8 h to ~2 min); collection is perfect-info, so the external
    flip does not affect it.
 
-**NEXT: (1) gen-8 crank.** The JTR arena chapter is CLOSED for now:
-export, PUCT calibration (ties POWERFUL) and raw arena all done
-2026-07-05 — external deployed config is PUCT, internal stays raw
-(harness-scoped DECISION, see crank update 2); the `--cheating`
-diagnostic resolved the external raw gap as the policy itself, not
-marginalization (refuted — log 2026-07-05).
-So next is **gen-8, scoped (2026-07-05) to the weight-decay arm
-alone**: standard PUCT collection (gen-7 generator, 32×2048), then two
-full-20k full-log runs on it — no-WD (the overfitting look; its U-min
-sets the ES epoch) vs `weight_decay=1e-2` (knob landed 2026-07-05,
-masked adamw), plus an ES-no-WD retrain at the U-min as the REAL
-comparison point: WD replaces ES only if WD@20k matches/beats the
-ES net head-to-head. The raw-vs-PUCT corpus A/B and
-the 15-batch dose-response / corpus-size decision are DEFERRED to
-gen-9 — pipeline optimization only pays if many rounds remain
-(details → jass_sop.md).
+**NEXT: the gen-9 DIRECTION probe.** gen-8 is CLOSED (2026-07-05):
+both arms — 8b_es (early stop @10k) and 8c_wd (weight decay 1e-2,
+full 20k) — gated WASH vs gen-7. **A same-size self-distillation
+round is a FIXED POINT at gen-7**; weight decay is shelved and early
+stopping stays the recipe until something re-opens the climb. The
+gen-9 option space and the pre-registered discriminating probe are in
+the log (2026-07-05 correction entry):
+
+- **A. JTR-mirror teacher** — gen-7 PUCT at K=45×64 (the JTR SWEEP_64
+  config, 2,880 expansions/move) vs gen-7 raw, internal, pmap'd over
+  the 2×4. Wins ≈ +8–10 → gen-9 collects at that config (~2.8×
+  Stage-1 cost, or a smaller corpus). Reads ~0 → the JTR
+  searcher/harness (not budget/worlds) explains the external +10.15,
+  and the weight shifts to B/C.
+- **B. Net capacity scaling** — bigger attn on the existing 64k gen-7
+  corpus; zero collection cost, gen-6b precedent, but fixed-point
+  targets may cap it.
+- **C. Gumbel target knobs** — `max_num_considered_actions` wider,
+  train on completed-Q `action_weights` instead of summed visits.
+
+Ruled out: more same-recipe fuel, more regularization, JTR games as
+targets (standing DECISION), Step-5 imperfect-info. The raw-vs-PUCT
+corpus A/B and the dose-response corpus-size decision stay DEFERRED —
+dose-response becomes live again immediately if Option A hits (fewer,
+better-labeled games is the cheap collection mode).
 
 ## Previous snapshot (2026-07-03)
 

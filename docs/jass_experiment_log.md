@@ -1201,3 +1201,83 @@ Results recorded in JTR's IDEAS.md (jj change `uvslltoswwys`):
   `--pgx-raw` mode in JTR (the current `--pgx-policy` flag only wires
   the policy head in as a PUCT prior); if raw ≥ POWERFUL, the deployed
   config beats the classical baseline at ~65× less compute per move.
+
+## 2026-07-05 — JTR raw arena, match 1: gen-7 RAW loses to POWERFUL −8.5/game — deploy-raw does NOT transfer to the external harness
+
+First run of JTR's new `--pgx-raw` mode (argmax of the policy head
+averaged over the round's determinizations — no tree, no rollouts;
+JTR commit `qzzrmuqy`). gen-7 raw (SWEEP_64 determinization budget,
+45 dets at trick 0) vs classical POWERFUL, 250 pairs / 500 games,
+seed 42:
+
+**−17.0/pair (−8.5/game), t=−6.20, p<0.0001, sign 85W-154L-11T
+(p<0.0001) — decisively negative.** Contrast with yesterday's gen-7
+PUCT@SWEEP_64 vs POWERFUL: −0.25/game, tied. Dropping search costs
+gen-7 ~8 pts/game against the classical baseline — the OPPOSITE sign
+of the internal deployment probe (gen-7 PUCT@64 vs own raw = −6.3,
+p=0.0033, "search hurts").
+
+Working interpretation (pending match 2, gen-7 PUCT vs gen-7 raw
+external): **not a contradiction — the internal probe was
+perfect-information.** pgx's env deals open hands and the net trains
+on them; internal "raw" plays argmax on the TRUE state. JTR raw must
+marginalize over hidden hands, and averaging policy probs across 45
+sampled worlds is the crudest information-set aggregation, while
+JTR's PUCT searches within each world and aggregates visit
+statistics (real information-set reasoning + value lookahead that
+can veto policy blunders against the out-of-distribution classical
+opponent). So externally the comparison is "rich determinization
+aggregation vs naive policy averaging" under hidden information, not
+"search vs no search."
+
+- Transitivity prediction for match 2: gen-7 PUCT beats gen-7 raw
+  externally by ≈ +8/game (sign flipped from internal −6.3).
+- If confirmed: **the deploy-raw DECISION is harness-scoped** — raw
+  stays the deployed config for pgx-internal (perfect-info) gates,
+  but JTR/real deployment keeps PUCT.
+- Queued diagnostic to split the −8.5: `--cheating` raw (single
+  forward pass on true hands = exactly the pgx-internal raw config;
+  supported in the raw code path, CLI flag not yet exposed) vs
+  POWERFUL. Ties POWERFUL → the whole gap is imperfect-info
+  marginalization; still loses → internal raw gains are partly
+  self-play-relative and don't transfer to classical opponents.
+
+## 2026-07-05 — JTR raw arena, match 2: gen-7 PUCT beats gen-7 raw +10.15/game — external sign FLIP confirmed; deploy-raw DECISION re-scoped
+
+gen-7 PUCT@SWEEP_64 vs gen-7 raw (same net both sides), 250 pairs /
+500 games, seed 42: **+20.3/pair (+10.15/game), t=7.34, p<0.0001,
+sign 171W-60L-19T (p<0.0001).** Decisive at 250 pairs.
+
+The three external numbers are internally consistent: raw ≈
+POWERFUL − 8.5; PUCT ≈ raw + 10.15 ≈ POWERFUL + 1.65 ≈ the observed
+near-tie. And the match-1 transitivity prediction (≈ +8, sign
+flipped from the internal −6.3) is confirmed at +10.15 — supporting
+the perfect-info-vs-imperfect-info mechanism over "the internal
+probe was wrong":
+
+- **Internal (pgx, perfect info):** the net plays argmax on the TRUE
+  state; 64-sim determinized search adds only noise → −6.3, search
+  hurts.
+- **External (JTR, hidden hands):** raw must marginalize by
+  averaging policy probs over 45 sampled worlds (crude); PUCT
+  searches within each world and aggregates visit statistics —
+  information-set reasoning + value lookahead vs an
+  out-of-distribution classical opponent → +10.15, search helps.
+
+**DECISION (2026-07-05): deploy-raw is HARNESS-SCOPED.**
+- pgx-internal (perfect-info gates, self-play): raw remains the
+  deployed config; the raw gate stays the standing progress gate;
+  the PUCT@64 deployed check stays retired.
+- JTR / any real imperfect-info deployment: the submitted config is
+  PUCT (SWEEP_64) — and that calibration is already done: gen-7
+  PUCT ties POWERFUL (2026-07-05 entry above).
+- The gen-8 raw-corpus A/B is UNAFFECTED: corpus collection happens
+  in pgx's perfect-info env, where raw τ=1.0 self-play is a valid
+  (and ~65× cheaper) generator; the open question there is target
+  quality, not deployment strength.
+
+Optional diagnostic still queued: `--cheating` raw vs POWERFUL
+(true-hands single forward pass = exactly the pgx-internal raw
+config; needs a CLI flag) to split the −8.5 into
+imperfect-info-marginalization cost vs genuine raw-policy weakness
+against classical opponents.

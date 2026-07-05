@@ -17,9 +17,11 @@ attn scripts and run through JTR's real-PUCT harness (SWEEP_64, 250
 pairs each): gen-6b_es vs gen-5b **+6.75/game p<0.0001** (external
 confirmation of the internal climb), both attn gens vs POWERFUL
 **flat ns** (trendline −22 → −9.5 → 0). gen-7 vs gen-6b_es washes
-under external PUCT too — same search-masking mechanism as the
-internal +1.1-ns check. Full entry in the log. Remaining: the raw
-submission (needs a `--pgx-raw` mode in JTR; in progress).
+under external PUCT too. Full entries in the log. **The raw arena
+(same day, via JTR's new `--pgx-raw`) flipped the internal
+search-hurts sign: externally PUCT > raw +10.15 and raw loses to
+POWERFUL −8.5 — see crank update 2 for the harness-scoped
+deployment DECISION.**
 
 **CHAMPION: gen-7 (`pv_gen7_s128.msgpack`) — `PolicyValueNetAttn`
 trained on the first gen-6b_es-generated corpus (64k games,
@@ -38,22 +40,30 @@ significant)**; PUCT@64 deployed check **FLAT (+1.1 ns)**.
    candidate channels: value labels from stronger games, visit
    distributions as variance-reduced self-distillation targets, corpus
    volume (the 15-batch dose-response arm separates these).
-2. **Search now HURTS at the deployed config: DEPLOY RAW.** gen-7
-   PUCT@64 vs its own raw = **−6.3 (p=0.0033)**; the flat promotion
-   check (+1.1) was two nets each dragged down by their own search
-   masking a +5/+10 raw gap. The PUCT@64 deployed check is retired
-   (the raw gate covers deployed strength); JTR submits raw once the
-   export scripts get attn support. Open crank question: gen-8's
-   teacher has NEGATIVE play margin — the queued raw-corpus arm tests
-   whether visit distributions still carry signal (if not, Stage 1
-   collapses from ~1.8 h to ~2 min).
+2. **Search now HURTS at the deployed config: DEPLOY RAW — re-scoped
+   2026-07-05: this holds for PERFECT-INFO harnesses only.** gen-7
+   PUCT@64 vs its own raw = **−6.3 (p=0.0033)** internally; the flat
+   promotion check (+1.1) was two nets each dragged down by their own
+   search masking a +5/+10 raw gap. The PUCT@64 deployed check is
+   retired (the raw gate covers deployed strength). **But in JTR's
+   imperfect-info harness the sign FLIPS: gen-7 PUCT beats gen-7 raw
+   +10.15 (p<0.0001), and raw loses to POWERFUL −8.5 where PUCT
+   ties** — raw must marginalize over hidden hands by naive policy
+   averaging while determinized PUCT does real information-set
+   reasoning. JTR/external submissions stay PUCT (log, 2026-07-05).
+   Open crank question: gen-8's teacher has NEGATIVE play margin
+   (internally) — the queued raw-corpus arm tests whether visit
+   distributions still carry signal (if not, Stage 1 collapses from
+   ~1.8 h to ~2 min); collection is perfect-info, so the external
+   flip does not affect it.
 
-**NEXT: (1) JTR raw-policy arena** — export + PUCT calibration DONE
-2026-07-05 (gap to POWERFUL = ZERO, see milestone above); remaining is
-the raw submission per the deploy-raw DECISION: implement `--pgx-raw`
-in JTR (current `--pgx-policy` only wires the policy head as PUCT
-prior), then gen-7 raw vs gen-6b_es raw and raw vs POWERFUL.
-**(2) gen-8 crank as a raw-vs-PUCT corpus A/B**, raw arm
+**NEXT: (1) gen-8 crank.** The JTR arena chapter is CLOSED for now:
+export, PUCT calibration (ties POWERFUL) and raw arena all done
+2026-07-05 — external deployed config is PUCT, internal stays raw
+(harness-scoped DECISION, see crank update 2). Optional leftover: a
+`--cheating` raw-vs-POWERFUL diagnostic to split the external raw
+gap (marginalization cost vs OOD-opponent weakness).
+So next is **gen-8 as a raw-vs-PUCT corpus A/B**, raw arm
 first (~45 min end-to-end; if its student gates flat vs gen-7, fall
 back to the standard PUCT collection — nothing lost). Then: weight-decay
 arm, 15-batch dose-response (details → jass_sop.md).

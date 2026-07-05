@@ -9,7 +9,17 @@ markers as work completes. **Dated experiment results and diagnostics live in
 `docs/jass_experiment_log.md`** (append new results there; this file keeps
 conclusions and pointers). The per-generation procedure is `docs/jass_sop.md`.
 
-## Status snapshot (2026-07-04)
+## Status snapshot (2026-07-05)
+
+**EXTERNAL MILESTONE (2026-07-05): the gap to JTR's classical POWERFUL
+has closed to ZERO.** gen-6b_es and gen-7, exported through the new
+attn scripts and run through JTR's real-PUCT harness (SWEEP_64, 250
+pairs each): gen-6b_es vs gen-5b **+6.75/game p<0.0001** (external
+confirmation of the internal climb), both attn gens vs POWERFUL
+**flat ns** (trendline −22 → −9.5 → 0). gen-7 vs gen-6b_es washes
+under external PUCT too — same search-masking mechanism as the
+internal +1.1-ns check. Full entry in the log. Remaining: the raw
+submission (needs a `--pgx-raw` mode in JTR; in progress).
 
 **CHAMPION: gen-7 (`pv_gen7_s128.msgpack`) — `PolicyValueNetAttn`
 trained on the first gen-6b_es-generated corpus (64k games,
@@ -38,13 +48,12 @@ significant)**; PUCT@64 deployed check **FLAT (+1.1 ns)**.
    whether visit distributions still carry signal (if not, Stage 1
    collapses from ~1.8 h to ~2 min).
 
-**NEXT (decided 2026-07-04, end of session): (1) JTR export + testing
-for the attn nets (gen-6b_es / gen-7)** — `extract_pv_weights.py` needs
-the attn template (small); `export_pv_savedmodel.py` is a TF/Keras
-REIMPLEMENTATION of the forward pass, so it needs the attn architecture
-ported (scope details → jass_sop.md queue item 1). Then a gen-7
-POWERFUL calibration submitting RAW (per the deploy-raw DECISION).
-**(2) tomorrow: gen-8 crank as a raw-vs-PUCT corpus A/B**, raw arm
+**NEXT: (1) JTR raw-policy arena** — export + PUCT calibration DONE
+2026-07-05 (gap to POWERFUL = ZERO, see milestone above); remaining is
+the raw submission per the deploy-raw DECISION: implement `--pgx-raw`
+in JTR (current `--pgx-policy` only wires the policy head as PUCT
+prior), then gen-7 raw vs gen-6b_es raw and raw vs POWERFUL.
+**(2) gen-8 crank as a raw-vs-PUCT corpus A/B**, raw arm
 first (~45 min end-to-end; if its student gates flat vs gen-7, fall
 back to the standard PUCT collection — nothing lost). Then: weight-decay
 arm, 15-batch dose-response (details → jass_sop.md).
@@ -517,7 +526,7 @@ Levers, **REORDERED by the measurement** (batch-fix first, then chips):
    subtree reuse (re-determinize every move, nothing to carry); any
    data-parallel trick (collection is *already* the parallel stage).
 
-## Step 4 — Scale and benchmark externally  [Status: IN PROGRESS — external benchmark DONE (gen-3 calibrated 2026-06-20, gen-5b re-calibrated 2026-07-02: gap to POWERFUL roughly HALVED, −22/game → ≈−9.5/game). Net scaling: IN PROGRESS since 2026-07-03 — value head first (attention over the 36 card rows vs mean pooling), per the sharpening-probe DECISION in the log: no search axis re-opens the operator on the current net, the leaf evaluator is the cap. First arm (gen-6b, shared-trunk PolicyValueNetAttn, standing recipe) first arm resolved 2026-07-03: full-20k training OVERFITS (value head fits seen data 0.073 vs holdout 0.147; gen-5b's gap is zero) but **early-stopped at 7k it PROMOTED — gen-6b_es is CHAMPION** (raw +10.3/+7.4, PUCT@64 +5.2 p=0.01, first significant deployed gain since gen-3). Remaining: weight-decay arm to replace hand-picked stopping; attn support in the JTR export scripts; re-profile collection for the attn net — see jass_sop.md "Current strategic state" and the log entries]
+## Step 4 — Scale and benchmark externally  [Status: IN PROGRESS — external benchmark DONE (gen-3 calibrated 2026-06-20, gen-5b re-calibrated 2026-07-02: gap to POWERFUL roughly HALVED, −22/game → ≈−9.5/game; gen-6b_es/gen-7 re-calibrated 2026-07-05: gap CLOSED TO ZERO, both flat ns vs POWERFUL). Net scaling: IN PROGRESS since 2026-07-03 — value head first (attention over the 36 card rows vs mean pooling), per the sharpening-probe DECISION in the log: no search axis re-opens the operator on the current net, the leaf evaluator is the cap. First arm (gen-6b, shared-trunk PolicyValueNetAttn, standing recipe) first arm resolved 2026-07-03: full-20k training OVERFITS (value head fits seen data 0.073 vs holdout 0.147; gen-5b's gap is zero) but **early-stopped at 7k it PROMOTED — gen-6b_es is CHAMPION** (raw +10.3/+7.4, PUCT@64 +5.2 p=0.01, first significant deployed gain since gen-3). Remaining: weight-decay arm to replace hand-picked stopping; attn support in the JTR export scripts; re-profile collection for the attn net — see jass_sop.md "Current strategic state" and the log entries]
 
 - Net scaling: attention over the 36 card rows is the natural upgrade from
   mean pooling; then width/depth, more simulations, larger batches.

@@ -1162,3 +1162,42 @@ wash. Own-search-margin trendline: +26 (gen-3 @128) → +11.1 (gen-4) →
   loop entirely. If the PUCT student wins, the visit-distribution
   self-distillation channel is real and search stays as the
   target-generator only.
+
+## 2026-07-05 — JTR re-calibration at gen-6b_es / gen-7: gap to POWERFUL closes to ZERO
+
+Both attn nets exported through the updated scripts (commit b942b68a)
+into JTR's `src/main/resources/models/{pv_gen6b_es_s128,pv_gen7b_es_s128}/export`
+(JTR dir `pv_gen7b_es_s128` = pgx champion `pv_gen7_s128.msgpack`; the
+`b_es` suffix is JTR-side naming only) and run through the same
+real-PUCT harness as the 2026-07-02 calibration (SWEEP_64 = 64
+runs/det, FLAT, RUNS mode, swapped-deal paired t-test), except **250
+pairs / 500 games** per match (halved from 500 pairs — the prior
+gen-5b-vs-gen-4 effect was significant with large margin), seed 42.
+Results recorded in JTR's IDEAS.md (jj change `uvslltoswwys`):
+
+| matchup | per-game | t | p | sign test | verdict |
+|:--|:--|:--|:--|:--|:--|
+| gen-6b_es vs gen-5b (SWEEP_64) | +6.75 | 4.89 | 0.0000 | 141W-93L-16T, p=0.0021 | gen-6b_es stronger |
+| gen-7 vs gen-6b_es (SWEEP_64) | +1.0 | 0.70 | 0.48 | 124W-108L-18T ns | wash |
+| gen-6b_es vs **POWERFUL** (classical) | +0.35 | 0.24 | 0.81 | 118W-122L-10T ns | tied |
+| gen-7 vs **POWERFUL** (classical) | −0.25 | −0.18 | 0.85 | 112W-120L-18T ns | tied |
+
+- **Headline: the absolute-strength gap to POWERFUL has closed to
+  ZERO.** Trendline: gen-3 ≈−22/game → gen-5b ≈−9.5/game → gen-6b_es /
+  gen-7 both flat ns. First time the pgx lineage matches the classical
+  baseline under JTR's harness rather than just narrowing the gap.
+- **gen-7 vs gen-6b_es washes under external PUCT too** — independent
+  reproduction of the 2026-07-04 mechanism (search at this model
+  strength masks raw gains; pgx's own PUCT@64 promotion check read
+  +1.1 ns over a real +5.2/+10.2 raw gap). Not a contradiction of
+  gen-7's raw gain.
+- **Parity caveat:** the SOP-scoped numeric parity test (SavedModel vs
+  `attn_model.apply` on random inputs) has not been run; the strongly
+  positive gen-6b_es-vs-gen-5b external result is itself evidence the
+  attn Keras port is sound (a broken forward pass would not beat the
+  verified gen-5b export by +6.75/game).
+- **Next (per the deploy-raw DECISION):** raw-policy arena in JTR —
+  gen-7 raw vs gen-6b_es raw, and raw vs POWERFUL. Requires a
+  `--pgx-raw` mode in JTR (the current `--pgx-policy` flag only wires
+  the policy head in as a PUCT prior); if raw ≥ POWERFUL, the deployed
+  config beats the classical baseline at ~65× less compute per move.

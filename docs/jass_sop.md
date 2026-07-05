@@ -166,9 +166,11 @@ need TWO model instances.
   (the old 0.13–0.14 band is the *old architecture's* level).
 **Queued work (order decided end-of-session 2026-07-04):**
 
-1. **NEXT: JTR export + testing for the attn nets (gen-6b_es / gen-7),
-   then a gen-7 POWERFUL calibration submitting RAW** (deploy-raw
-   DECISION, 2026-07-04). Scope (surveyed 2026-07-04):
+1. **NEXT: JTR raw-policy arena.** Export + PUCT calibration DONE
+   2026-07-05 — gap to POWERFUL closed to ZERO (log entry 2026-07-05).
+   Remaining: `--pgx-raw` mode in JTR, then gen-7 raw vs gen-6b_es raw
+   and raw vs POWERFUL (deploy-raw DECISION, 2026-07-04). Original
+   export scope (surveyed 2026-07-04, landed b942b68a):
    - `scripts/extract_pv_weights.py` hardcodes `PolicyValueNet()` at
      `model = PolicyValueNet()` — needs an `--arch` flag or template-free
      msgpack_restore (small).

@@ -5,6 +5,7 @@ import pytest
 from pgx._src.games.jass import DECLARE_OFFSET, Game, MODE_SCORES
 from pgx._src.games.jass_puct import (
     _pv_eval,
+    _qsum_scores,
     _rollout_value,
     make_puct_action_fn,
     make_puct_collect_fn,
@@ -166,6 +167,22 @@ def test_puct_action_grounded_knobs_legal():
                          search_variant="muzero",
                          prior_mix_uniform=1.0, rollout_value_weight=1.0)
     assert bool(game.legal_action_mask(state)[action])
+
+
+def test_qsum_scores_mean_not_sum_under_negative_q():
+    """From a losing position the well-searched least-bad move must win.
+
+    Raw score-sum Σ N·Q prefers the lightly-visited terrible action
+    (−40·2 = −80 beats −1·40 = −40): the bug behind the −61 probe
+    reading of 2026-07-06. Visit-weighted mean Q must rank them right.
+    """
+    visits = jnp.array([[20.0, 1.0, 0.0], [20.0, 1.0, 0.0]])   # (K=2, A=3)
+    qvalues = jnp.array([[-1.0, -40.0, 0.0], [-1.0, -40.0, 0.0]])
+    legal = jnp.array([True, True, True])
+    scores = _qsum_scores(visits, qvalues, legal)
+    assert int(jnp.argmax(scores)) == 0
+    assert jnp.isclose(scores[0], -1.0) and jnp.isclose(scores[1], -40.0)
+    assert scores[2] == -jnp.inf                # unvisited, never argmax
 
 
 def test_qsum_readout_action_legal_and_one_hot_pi():

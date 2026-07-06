@@ -9,8 +9,9 @@ as the dynamics. The K trees are aggregated by SUMMING ROOT
 VISIT COUNTS and acting on the summed counts — the load-bearing choice from
 docs/jass_plan.md (Q-sum aggregation neutralizes the tree policy). That
 holds for NET-PRIOR search only: under flat priors visits stay ~uniform
-and the visit readout picks near-noise, so `readout="qsum"` provides the
-JTR-style score-sum Σ_k N_k(a)·Q_k(a) instead (2026-07-06 probe log).
+and the visit readout picks near-noise, so `readout="qsum"` provides a
+JTR-style Q aggregation instead — visit-weighted MEAN Q across the K
+trees (2026-07-06 probe log; see `_qsum_scores` for why mean, not sum).
 
 Grounded-teacher knobs (2026-07-06, the gen-9 fixed-point escape —
 see the plan's NEXT block): `prior_mix_uniform` mixes the net's priors
@@ -44,6 +45,22 @@ from pgx._src.games.jass_mcts import sample_determinization
 _game = Game()
 
 _ILLEGAL = jnp.float32(-1e9)
+
+
+def _qsum_scores(visits: Array, qvalues: Array, legal: Array) -> Array:
+    """Visit-weighted MEAN Q per action across the K trees.
+
+    (K, A) visits/qvalues → (A,) scores, −inf where illegal or unvisited
+    in every tree (argmax-safe as-is). Mean, NOT JTR's raw score-sum:
+    our Q is a ±157 points differential, and Σ N·Q inverts preferences
+    whenever Q<0 — it scores a lightly-visited terrible action above a
+    heavily-visited slightly-losing one (measured: −61 vs gen-9 raw,
+    2026-07-06, vs −24.3 for the visits readout). JTR can sum because
+    its per-leaf scores are non-negative (0..157).
+    """
+    n = visits.sum(axis=0)                               # (A,)
+    q = (visits * qvalues).sum(axis=0) / n.clip(1.0)     # (A,)
+    return jnp.where(legal & (n > 0), q, -jnp.inf)
 
 
 def _hold_if(done: Array, old: GameState, new: GameState) -> GameState:
@@ -221,16 +238,17 @@ def puct_search(
         readout: How the K root results become one score vector.
             "visits" (default): SUM ROOT VISIT COUNTS — correct when the
             priors concentrate visits (the net-prior search). "qsum":
-            JTR-style score-sum, Σ_k N_k(a)·Q_k(a) over the K trees —
-            correct for flat-prior search, where visits stay ~uniform
-            and the visit readout picks near-noise (measured: classical
-            λ=1/w=1 read by visits = −24.3 vs gen-9 raw, 2026-07-06).
+            JTR-style Q aggregation, visit-weighted mean Q across the
+            K trees — correct for flat-prior search, where visits stay
+            ~uniform and the visit readout picks near-noise (measured:
+            classical λ=1/w=1 read by visits = −24.3 vs gen-9 raw,
+            2026-07-06; see `_qsum_scores` for why mean, not sum).
 
     Returns:
         (scores, legal): (43,) float32 aggregated root scores and the
         (43,) bool legal mask of the information state. readout="visits":
         summed visit counts, zero on illegal actions. readout="qsum":
-        visit-weighted Q mass in points, −inf on actions that are
+        visit-weighted mean Q in points, −inf on actions that are
         illegal or unvisited in every tree (argmax-safe as-is).
     """
     if readout not in ("visits", "qsum"):
@@ -286,9 +304,7 @@ def puct_search(
         scores = jnp.where(legal, visits.sum(axis=0), 0.0)
     else:  # "qsum" — qvalues are root-mover perspective in all K trees;
         # unvisited children hold Q=0, so N·Q weighting ignores them.
-        qmass = (visits * summary.qvalues).sum(axis=0)   # (43,)
-        scores = jnp.where(
-            legal & (visits.sum(axis=0) > 0), qmass, -jnp.inf)
+        scores = _qsum_scores(visits, summary.qvalues, legal)
     return scores, legal
 
 

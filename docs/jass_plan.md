@@ -63,30 +63,40 @@ significant)**; PUCT@64 deployed check **FLAT (+1.1 ns)**.
    ~1.8 h to ~2 min); collection is perfect-info, so the external
    flip does not affect it.
 
-**NEXT: the gen-9 DIRECTION probe.** gen-8 is CLOSED (2026-07-05):
-both arms — 8b_es (early stop @10k) and 8c_wd (weight decay 1e-2,
-full 20k) — gated WASH vs gen-7. **A same-size self-distillation
-round is a FIXED POINT at gen-7**; weight decay is shelved and early
-stopping stays the recipe until something re-opens the climb. The
-gen-9 option space and the pre-registered discriminating probe are in
-the log (2026-07-05 correction entry):
+**NEXT: gen-9 direction.** gen-8 is CLOSED (2026-07-05): both arms —
+8b_es (early stop @10k) and 8c_wd (weight decay 1e-2, full 20k) —
+gated WASH vs gen-7. **A same-size self-distillation round is a FIXED
+POINT at gen-7**; weight decay is shelved and early stopping stays
+the recipe until something re-opens the climb.
 
-- **A. JTR-mirror teacher** — gen-7 PUCT at K=45×64 (the JTR SWEEP_64
-  config, 2,880 expansions/move) vs gen-7 raw, internal, pmap'd over
-  the 2×4. Wins ≈ +8–10 → gen-9 collects at that config (~2.8×
-  Stage-1 cost, or a smaller corpus). Reads ~0 → the JTR
-  searcher/harness (not budget/worlds) explains the external +10.15,
-  and the weight shifts to B/C.
+**The direction probe RESOLVED (2026-07-06, log entry): Option A —
+re-open the operator with mctx budget/worlds — is CLOSED by
+measurement.** gen-7 PUCT at the JTR-mirror config (K=45×64, 2,880
+expansions/move) reads −1.1 ns vs its own raw; K is a noise knob
+(−9.8 @K=8 → −3.4 @K=16 → −1.1 @K=45, converging to zero from
+below) and depth at fixed budget actively hurts (K=8×360: −9.8***).
+Yet JTR's searcher extracts **+10.15** from the same net at the same
+budget — a stronger-than-raw teacher EXISTS, in JTR's search
+mechanics or harness, not in mctx sims/worlds. Live candidates:
+
+- **A′. Import the JTR searcher delta** — read JTR's `--pgx-policy`
+  search code first (zero compute): rollout-blended leaf evals would
+  mean the +10 is rollout ground truth correcting the value head
+  (→ prototype rollout-backed collection targets); pure net
+  priors+value would mean selection/backup mechanics (→ mirror in
+  `mctx.muzero_policy` and re-run the probe). The only lever with a
+  measured +10 behind it.
 - **B. Net capacity scaling** — bigger attn on the existing 64k gen-7
   corpus; zero collection cost, gen-6b precedent, but fixed-point
   targets may cap it.
-- **C. Gumbel target knobs** — `max_num_considered_actions` wider,
-  train on completed-Q `action_weights` instead of summed visits.
+- **C. Gumbel target knobs** — train on completed-Q `action_weights`
+  instead of summed visits; expectations capped by the probe.
 
-Ruled out: more same-recipe fuel, more regularization, JTR games as
-targets (standing DECISION), Step-5 imperfect-info. The raw-vs-PUCT
-corpus A/B and the dose-response corpus-size decision stay DEFERRED —
-dose-response becomes live again immediately if Option A hits (fewer,
+Ruled out: mctx budget/worlds (the probe), more same-recipe fuel,
+more regularization, JTR games as targets (standing DECISION),
+Step-5 imperfect-info. The raw-vs-PUCT corpus A/B and the
+dose-response corpus-size decision stay DEFERRED — dose-response goes
+live again the moment any stronger teacher lands (fewer,
 better-labeled games is the cheap collection mode).
 
 ## Previous snapshot (2026-07-03)

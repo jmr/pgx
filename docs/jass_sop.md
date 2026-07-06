@@ -189,12 +189,14 @@ need TWO model instances.
   (the old 0.13–0.14 band is the *old architecture's* level).
 **Queued work (order decided end-of-session 2026-07-04):**
 
-0. **NEXT (2026-07-05): gen-9 direction probe** — gen-8 closed as a
-   fixed point at gen-7 (both arms wash); the option space (A:
-   JTR-mirror teacher / B: capacity / C: Gumbel target knobs) and the
-   pre-registered three-arm probe (gen-7 PUCT K=45×64 / K=16×128 /
-   K=8×360 vs gen-7 raw, pmap'd over the 2×4, 320 pairs/arm) are in
-   the log's 2026-07-05 correction entry and the plan's NEXT block.
+0. **NEXT (2026-07-06): gen-9 direction — probe DONE, Option A
+   CLOSED.** No mctx config beats gen-7 raw (JTR-mirror K=45×64:
+   −1.1 ns; depth control K=8×360: −9.8***), yet JTR's searcher gets
+   +10.15 from the same net at the same budget. Next action is A′:
+   read JTR's `--pgx-policy` search code to identify the delta
+   (rollout-blended leaf evals vs selection/backup mechanics); B
+   (capacity on the existing corpus) is the parallel internal lever.
+   Full option table: log 2026-07-06 entry + plan NEXT block.
 1. **DONE 2026-07-05: JTR arena chapter.** Export + PUCT calibration
    (gap to POWERFUL = ZERO) + raw arena (`--pgx-raw`, JTR change
    `qzzrmuqy`): externally PUCT > raw +10.15 and raw < POWERFUL

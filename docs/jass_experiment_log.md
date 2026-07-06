@@ -1493,3 +1493,60 @@ chunk per chip (`jax.pmap`, SOP probe-parallelization TODO now done),
 
 Predictions: budget/worlds hypothesis → arm 1 ≈ +8–10 with arm 3
 lagging it; searcher/harness hypothesis → all arms ≈ 0.
+
+## 2026-07-06 — gen-9 direction probe: NO mctx config beats gen-7 raw at the JTR budget — Option A (budget/worlds) is CLOSED; the external +10.15 lives in the SEARCHER/harness
+
+The pre-registered three-arm probe (2026-07-05 correction entry), run
+on the 2×4 via the new pmap recipe — the chip-parallel `policy_match`
+worked first try, ~8 min wall clock for all three arms at 320
+pairs/arm (the old single-device estimate was ~14 min per *arm*).
+gen-7 PUCT (greedy summed-visit argmax; champion alias gen-7b_es =
+`pv_gen7_s128.msgpack`, the JTR export name — see 2026-07-05) vs
+gen-7 raw (τ=0.05), same deals across arms:
+
+| arm | exp/move | mean/game | t | p | sign (pairs) |
+|:--|:--|:--|:--|:--|:--|
+| K=45×64 (JTR mirror) | 2,880 | −1.1 | −0.66 | 0.51 ns | 150W/164L ns |
+| K=16×128 (anchor) | 2,048 | −3.4 | −1.99 | 0.048 * | 137W/175L * |
+| K=8×360 (depth ctl) | 2,880 | −9.8 | −5.52 | <0.0001 *** | 114W/200L *** |
+
+- **Pre-registered prediction resolved: the searcher/harness
+  hypothesis wins.** The JTR-mirror config reaches zero (−1.1 ns) —
+  the predicted +8–10 budget effect is decisively excluded. No
+  reachable mctx configuration produces a positive margin over raw.
+- **K is a noise knob, not a strength knob.** At ~fixed budget the
+  worlds axis is monotone but converges to zero FROM BELOW: −9.8
+  (K=8) → −3.4 (K=16) → −1.1 (K=45). More determinizations only
+  cancel determinization noise; they never add margin.
+- **Depth actively HURTS at fixed budget**: 360 sims in 8 worlds is
+  the worst config ever measured on an attn net (−9.8). Reading: a
+  deep search inside one sampled world commits to that world's
+  private information, so the per-world recommendation drifts from
+  the information-set optimum, and 8 worlds can't average the drift
+  out — while the raw baseline plays the TRUE state, making every
+  determinization artifact pure cost.
+- **Reconciliation with JTR (+10.15 PUCT-vs-raw, same net):** the
+  cheating-raw diagnostic showed true-state raw ≈ marginalized raw
+  (~1 pt), so the baselines are comparable — in JTR's harness the
+  same net's search extracts ~+10 over raw where mctx-Gumbel at the
+  same budget extracts ~0. **A teacher stronger than gen-7 raw
+  demonstrably EXISTS; it lives in JTR's searcher (or harness), not
+  in mctx sims/worlds.**
+- **The question that now matters (Option A′, zero compute): what
+  does JTR's `--pgx-policy` search evaluate leaves with?** If it
+  blends its classical ROLLOUT machinery with the net, the +10 is
+  rollout ground truth correcting value-head blind spots — an
+  importable teacher signal (rollout-backed leaf evals at
+  collection). If it is pure net priors+value, the delta is
+  selection/backup mechanics (full-width classical PUCT vs Gumbel
+  sequential halving read out via summed visits) — importable by
+  mirroring JTR's search in mctx (`muzero_policy`, its c/backup) and
+  re-running this probe.
+
+**Option table after the probe:** A (mctx budget/worlds) CLOSED by
+measurement. Live: **A′** — read JTR's search code, identify the
+delta, import it, re-probe (code reading is free; this is the only
+lever with a MEASURED +10 behind it); **B** — capacity scaling on the
+existing 64k corpus (unchanged, still zero collection cost); **C** —
+Gumbel `action_weights` targets (unchanged but expectations capped:
+no internal config shows play-strength margin to distill).

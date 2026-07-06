@@ -1845,3 +1845,38 @@ vs gen-9 raw:
 3. Dose-response (15-batch student) — corpus-size DECISION.
 4. Parked: C′ gumbel-native-readout probe; B capacity scaling (now a
    live candidate if the operator probe reads saturation).
+
+## 2026-07-06 — Operator probe at the new champion: muzero K=16×64 vs gen-9 raw = −1.0 ns — the operator margin is GONE (recipe saturated)
+
+Same probe config as the pre-collection sweep (muzero, pb_c=1.25,
+K=16×64, greedy teacher vs raw temp 0.05), teacher and baseline BOTH
+gen-9 (fp 693.58), 320 pairs on the 2×4:
+
+- **mean −1.0/game, t=−0.765 p=0.4450 ns, sign 130W/140L p=0.5840 ns**
+  (wins 309 / losses 331). The margin didn't just shrink — it's at
+  zero (marginally negative).
+- **The operator arc, top to bottom:** muzero K=16×64 read **+10.5
+  over gen-7 raw** (pre-collection probe) → gen-8d_mz raw beat gen-7
+  by +13.7/+11.0 → gen-9 raw beat gen-8d_mz by only +2.8/+4.2 → and
+  now the SAME teacher **can't beat gen-9's raw at all.** The student
+  has caught up to its teacher: at the K=16×64 collection budget,
+  search no longer improves on the raw policy, so there is no target
+  signal left for a gen-10 on the identical recipe to climb. This is
+  the fixed point the plan anticipated ("with the anchor gone, a flat
+  raw gate will then mean saturation for real").
+
+**DECISION (2026-07-06): do NOT run gen-10 on the fixed muzero K=16×64
+recipe — it would gate flat. Two candidate levers; one cheap
+diagnostic decides between them BEFORE any collection/training:**
+- **Sweep the teacher budget UP first (cheap, no training): muzero
+  K=32×64 and K=45×64 vs gen-9 raw, same probe.** This is the SOP
+  "starved operator" test — a small/negative margin at the current
+  budget may just mean the teacher is under-resourced now that the
+  student is strong.
+  - **Margin reopens with more worlds** → the net still has headroom;
+    gen-10 = crank the teacher harder (more worlds, keep sims=64 per
+    worlds-over-depth) and pay the higher collection cost.
+  - **Still flat at K=45×64** → search is not the constraint, NET
+    CAPACITY is. Pull the **B capacity lever** (hidden=128 → larger
+    `PolicyValueNetAttn`) — the parked item, now the live path.
+- JTR re-calibration stays owed regardless (two promotions banked).

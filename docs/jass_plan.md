@@ -18,12 +18,19 @@ pb_c=1.25), only the generator advanced to the new champion; full
 20k, NO U-curve again, loss floors dropped further (holdout v 0.0655,
 policy CE 0.604). **But the step collapsed ~4–5× vs gen-8d_mz's
 +13.7/+11.0** — the first same-recipe iteration, so the big jump was
-the one-time teacher-swap unlock and iterating the fixed recipe now
-yields a thin gen-over-gen gain. **DECELERATION FLAG: re-run the
-operator probe (muzero vs gen-9 raw) before committing gen-10 to the
-same recipe** — margin holds → run as-is; margin compressed → change
-a lever (B capacity / corpus size). JTR re-calibration still owed
-(two promotions banked; can raw match POWERFUL?); dose-response owed.
+the one-time teacher-swap unlock and iterating the fixed recipe yields
+a thin gen-over-gen gain.
+
+**SATURATION CONFIRMED (2026-07-06): the operator probe reads muzero
+K=16×64 vs gen-9 raw = −1.0 ns** — the teacher that led gen-7 raw by
++10.5 can no longer beat gen-9's raw at all. The student caught up to
+its teacher; a gen-10 on the identical recipe would gate flat.
+**NEXT: sweep the teacher budget UP (muzero K=32×64 / K=45×64 vs
+gen-9 raw) — cheap, no training.** Margin reopens → gen-10 cranks the
+teacher harder; still flat at K=45×64 → search isn't the constraint,
+pull the **B capacity lever** (hidden=128 → larger net). JTR
+re-calibration still owed (two promotions banked; can raw match
+POWERFUL?); dose-response owed.
 
 ## Previous snapshot (2026-07-06 — gen-8d_mz)
 

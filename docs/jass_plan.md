@@ -35,34 +35,28 @@ JTR games in the training mix (standing DECISION 2026-07-05,
 Step 4b)**; JTR is the preserved external benchmark, and the goal is
 strong *general* Jass, not a JTR-exploiter.
 
-**NEXT (2026-07-06): gen-10 GROUNDED-TEACHER PROBES — all in-house.**
-Mechanism of the fixed point: the loop is fully closed — the net's
-logits are the priors at every tree node, the net's value head is the
-only leaf evaluator, and collection ran `dirichlet_fraction=0`.
-Nothing external ever enters, so search(π) → π. POWERFUL's edge is
-grounding (rollout evaluations = real game outcomes), not anything
-JTR-specific. Three probe arms on the standing operator-probe harness
-(320 pairs, greedy teacher vs gen-9 raw τ=0.05, muzero K=16×64,
-pb_c=1.25):
-1. **Root noise:** `dirichlet_fraction=0.25` (knob existed, never on).
-   Unlikely to move the greedy probe alone, but goes into gen-10
-   collection regardless (missing AlphaZero ingredient).
-2. **Flat priors:** `prior_mix_uniform=λ` (new knob) — mix priors
-   toward uniform-over-legal at root and tree nodes; λ=1 = uniform-
-   prior PUCT. Safe per JTR's own experiment (uniform-prior PUCT tied
-   its classical baseline). Breaks the prior half of self-confirmation.
-3. **Rollout leaf value:** `rollout_value_weight=w` (new knob) — blend
-   the value head toward a uniform-random playout to terminal, real
-   points; w=1 = classical evaluation. Breaks the value half. Arms
-   2+3 combined = in-house classical ISMCTS, the POWERFUL-equivalent
-   with zero JTR content.
-Go/no-go: any arm reopening a significant margin vs gen-9 raw is the
-gen-10 teacher → collect with it (+ root noise), gate raw-vs-raw vs
-gen-9; JTR re-calibration stays the held-out generalization check.
-All flat → the operator class is the cap: port JTR PUCT algorithmic
-diffs (code/ideas fair game, games not), and B-capacity only PAIRED
-with whatever stronger teacher emerges. JTR re-calibration owed
-regardless.
+**GROUNDED-TEACHER PROBES: ALL FOUR ARMS FAILED (2026-07-06, log).**
+Root noise −0.8 ns; rollout leaf value w=1 −1.9 ns (a random playout
+≈ the value head as leaf guidance — the PRIORS, not the value, are
+the binding self-confirmation); flat priors λ=1 −13.7*** and
+classical λ=1/w=1 −24.3*** — but the flat-prior collapses are the
+**argmax-summed-visits readout failing on a non-concentrating visit
+distribution** (JTR ideas.md predicted exactly this), not clean
+evidence on classical search strength. And the existence proof is
+STALE: POWERFUL's +8.5 was vs gen-7-era raw; gen-9 is ≈+16 internal
+points above that, so POWERFUL's edge over gen-9 may already be ≈0.
+
+**NEXT (2026-07-06): (1) gen-9 JTR re-calibration — DECISION-CRITICAL
+(owed anyway).** Export gen-9 → JTR real-PUCT harness vs POWERFUL.
+Still clearly below → headroom real: **(2) build the Q-sum-over-
+determinizations readout knob** (JTR's aggregation; correct for
+uniform-prior search where argmax-visits reads noise) and re-probe
+classical λ=1 w=1 at K=45×64 (POWERFUL-parity, in-house) — a win =
+the gen-10 teacher. gen-9 ≈/above POWERFUL → the equal-compute
+existence proof is gone (we've caught classical search at this budget
+class); reframe: above-parity teachers (budget + B-capacity) or
+stronger external calibration targets (JTR++, KUS). NO JTR games in
+the training mix in any branch (2026-07-05, Step 4b).
 
 ## Previous snapshot (2026-07-06 — gen-8d_mz)
 

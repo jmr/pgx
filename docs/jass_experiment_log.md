@@ -1935,3 +1935,60 @@ candidates, strongest first:**
    worthless on the already-absorbed current corpus.
 3. Low/parked: pure B-scaling on the current corpus (expected wash;
    keep only as a cheap null-check if it's ~free to run).
+
+## 2026-07-06 — Grounded-teacher probes: all four arms FAIL — flat-prior arms confounded by the argmax-visits readout; gen-9 JTR re-calibration now DECISION-CRITICAL
+
+The four probe arms from the plan's NEXT block, on the standing
+operator-probe harness (320 pairs on the 2×4, greedy teacher vs gen-9
+raw τ=0.05, muzero K=16×64, pb_c=1.25; knob-free baseline = −1.0 ns;
+new `jass_puct` knobs `prior_mix_uniform` / `rollout_value_weight`):
+
+| arm | mean/game | t | sign (pairs) |
+|:--|:--|:--|:--|
+| dirichlet 0.25 | −0.8 | −0.675 p=0.4999 ns | 131W/139L ns |
+| flat prior λ=1 | **−13.7** | −7.844 p=0.0000 *** | 101W/210L *** |
+| rollout value w=1 | −1.9 | −1.560 p=0.1196 ns | 131W/136L ns |
+| classical λ=1 w=1 | **−24.3** | −12.794 p=0.0000 *** | 67W/246L *** |
+
+- **Root noise: nothing** (−0.8 ≈ the −1.0 baseline) — expected for a
+  greedy probe; still the standard ingredient for any future
+  collection run.
+- **Rollout value w=1 is FLAT, not worse** (−1.9 ns, and only ~2×
+  slower: 121 s vs 58 s for 5 rounds). A single uniform-random
+  playout is worth as much as the trained value head as leaf guidance
+  at this budget. So the value head is NOT the binding half of the
+  self-confirmation — **the priors are**: with prior-guided
+  exploration at 64 sims over ≤9 actions, the tree follows π
+  regardless of the evaluator.
+- **The flat-prior collapses are NOT clean evidence that classical
+  search is weak — they are the readout failing.** Our aggregation is
+  argmax of SUMMED ROOT VISITS; JTR's ideas.md predicted this exact
+  failure ("argmax-visits with UCB/uniform tree policy: visits still
+  ~uniform within tree → argmax picks a near-random move. Worse than
+  baseline"). With uniform priors, 64 sims/world doesn't concentrate
+  visits, so the summed-visit argmax reads noise. A clean in-house
+  classical replica needs JTR's **Q-sum-over-determinizations
+  readout** — a readout knob we haven't built (deliberately: Q-sum
+  was rejected for the *net-prior* search because it neutralizes the
+  tree policy; for a uniform-prior search the trade flips).
+- **STALENESS FLAG on the existence proof.** "POWERFUL beats our raw
+  ~+8.5 at 2,880 exp/move" was measured 2026-07-05 against
+  gen-6b_es/gen-7-era raw. gen-9 raw is ≈ +16 internal points above
+  gen-7 (+13.7 then +2.8). If that transfers through the JTR harness,
+  POWERFUL's edge over gen-9 may already be ≈0 — **the target the
+  grounded-teacher hunt is chasing may no longer exist.**
+
+**DECISION (2026-07-06): the gen-9 JTR re-calibration (owed since
+gen-8d_mz) is now DECISION-CRITICAL, not hygiene — it determines
+whether external headroom exists at all. Export gen-9 → JTR real-PUCT
+harness vs POWERFUL before building anything else:**
+- **gen-9 still clearly below POWERFUL** → headroom is real: build
+  the Q-sum readout knob, re-probe classical λ=1 w=1 at K=45×64
+  (POWERFUL-parity, in-house) with it; a win there = the gen-10
+  teacher.
+- **gen-9 ≈ or above POWERFUL** → the equal-compute existence proof
+  is gone; the fixed point means we've *caught up with classical
+  search at this budget class*. The remaining levers are then
+  above-parity teachers (budget + capacity scaling) or stronger
+  external engines (JTR++, KUS) as calibration targets — reframe the
+  plan, and B-capacity moves back up on its own merits.

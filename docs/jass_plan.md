@@ -87,13 +87,15 @@ net outgrew small-sim Gumbel", not "self-play is exhausted".
 
 **gen-9 = the muzero-teacher crank (DECISION 2026-07-06, log):**
 
-1. **Pre-collection probe:** muzero at the STANDING collection config
-   K=8×128 vs gen-7 raw. Margin holds → Stage 1 cost unchanged;
-   collapses → find the cheapest config that keeps it (K=16×64, …,
-   up to K=45×64 at ~2.8×).
+1. **Pre-collection probe DONE (2026-07-06, log): the margin holds
+   cheap** — K=16×64 reads +10.5 (≈91% of the JTR-budget margin at
+   36% of the cost; worlds-over-depth again: 8×128 only +7.1).
 2. **Collect** with `make_puct_collect_fn(..., search_variant=
-   "muzero", pb_c_init=1.25)`, `dirichlet_fraction=0`, τ=1.0,
-   standard 32×2048. Train (ES per recipe), gate raw-vs-raw vs gen-7.
+   "muzero", pb_c_init=1.25, num_determinizations=16,
+   num_simulations=64)`, `dirichlet_fraction=0`, τ=1.0, standard
+   32×2048 (per-chip B=8 should stand — same tree working set;
+   `profile_collect_fn` sanity check first). Train (ES per recipe),
+   gate raw-vs-raw vs gen-7.
 3. **Dose-response goes LIVE** (stronger targets may need fewer
    games; it carries the corpus-size DECISION for the new recipe).
 

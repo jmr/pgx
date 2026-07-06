@@ -1652,3 +1652,38 @@ only the searcher swapped (`search_variant="muzero"`,
   for the new recipe).
 - The raw gate stays the progress gate; external deployment stays
   JTR-PUCT (unchanged).
+
+## 2026-07-06 — Pre-collection probe: the muzero margin HOLDS at cheap configs — gen-9 collects at K=16×64 (standing cost class, +10.5)
+
+Same setup as the pb_c sweep (muzero, pb_c=1.25, 320 pairs/arm, same
+seeds/deals), cheap configs:
+
+| arm | exp/move | mean/game | t | p | sign (pairs) |
+|:--|:--|:--|:--|:--|:--|
+| K=8×128 (standing collect cfg) | 1,024 | +7.1 | +3.97 | 0.0001 *** | 190W/117L *** |
+| K=16×64 (worlds swap) | 1,024 | **+10.5** | +6.40 | <0.0001 *** | 200W/103L *** |
+| K=8×64 (old deployed cfg) | 512 | +9.4 | +5.69 | <0.0001 *** | 192W/112L *** |
+
+- **The margin holds at every cheap config** — no knee between 512
+  and 2,880. Even 512 exp/move reads +9.4 where Gumbel read −6.3: a
+  ~15.7-point searcher swing at the old deployed budget. (The
+  internal "search hurts → deploy raw" finding is therefore
+  searcher-scoped too; the raw gate stays the progress gate
+  regardless — it measures the POLICY, which is what training moves.)
+- **Worlds-over-depth, yet again, now for classical PUCT:** at equal
+  budget 16×64 (+10.5) beats 8×128 (+7.1), and 8×64 (+9.4) ≥ 8×128
+  (+7.1) at HALF the cost — extra per-world depth is
+  worthless-to-harmful. The three probes agree: spend budget on
+  worlds, keep per-world sims at 64.
+- **K=16×64 delivers ~91% of the full JTR-budget margin (+11.5) at
+  36% of the cost.**
+
+**DECISION (2026-07-06): gen-9 Stage 1 = standard 32×2048 with
+`make_puct_collect_fn(..., search_variant="muzero", pb_c_init=1.25,
+num_determinizations=16, num_simulations=64)`, τ=1.0,
+`dirichlet_fraction=0`.** Tree working set is unchanged (16×65 ≈
+8×129 nodes/game), so per-chip B=8 should stand — quick
+`profile_collect_fn` sanity check per SOP before the crank; wall
+clock may even improve (half the sequential sims at 2× the leaf-eval
+batch). Teacher margin +10.5 is gen-4-band fuel (+11.1 → +15 raw
+gate) — the first real teacher signal since gen-6b.

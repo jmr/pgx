@@ -193,11 +193,13 @@ need TWO model instances.
    operator is RE-OPENED.** `search_variant="muzero"` (classical
    PUCT via `mctx.muzero_policy`, landed `sxznyotm`) beats gen-7 raw
    **+11.8*** at K=45×64** where Gumbel read −1.1 ns — same budget,
-   same net, same deals; pb_c plateau 0.64–2.5. First action: the
-   pre-collection probe (muzero at the standing K=8×128 collection
-   config vs raw — decides whether Stage 1 cost changes at all),
-   then collect with `search_variant="muzero", pb_c_init=1.25,
-   dirichlet_fraction=0`, τ=1.0. Dose-response is LIVE again. Full
+   same net, same deals; pb_c plateau 0.64–2.5. Pre-collection probe
+   DONE: the margin holds cheap — **gen-9 collection config =
+   `search_variant="muzero", pb_c_init=1.25, num_determinizations=16,
+   num_simulations=64`** (+10.5 at the standing 1,024-exp/move cost;
+   worlds-over-depth: 8×128 only +7.1), `dirichlet_fraction=0`,
+   τ=1.0, 32×2048, per-chip B=8 pending a quick `profile_collect_fn`
+   check. Dose-response is LIVE again. Full
    arc: log 2026-07-06 entries + plan NEXT block. ⚠ The Gumbel
    default is UNCHANGED in code — collection cells must pass
    `search_variant="muzero"` explicitly.

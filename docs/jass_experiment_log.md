@@ -1704,3 +1704,34 @@ about generator AND recipe; the champion PARAMS file stays `7b_es`
 (no `_mz` — load it via a separate CHAMP token). Corpus kept BIG on
 purpose — 32×2048 like the washed arms — so the searcher swap is the
 ONLY change.
+
+## 2026-07-06 — gen-8d_mz full 20k train on the muzero corpus: NO U-curve — the first attn run that does not overfit; gates as the 20k net (no _es earned)
+
+Stage 2 on `corpus_puct_gen7b_es_mz` (32×2048, muzero K=16×64
+teacher), standard recipe, full 20k:
+
+- **No overfit onset AT ALL through 20k** — eval total flat-to-falling
+  to the end (0.7967 @19.9k, still drifting down), train≈eval gap
+  ~0.005, value seen-vs-holdout gap essentially CLOSED. Every previous
+  64k attn run turned up at ~12k. **Early stopping is unnecessary for
+  this corpus: the gate candidate is the 20k net, named gen-8d_mz
+  (the _es suffix is not earned).**
+- **Holdout value loss ≈ 0.074** vs the 0.111–0.113 floor of every
+  gumbel-corpus run — a ~33% drop. Comparability caveat: v is measured
+  against THIS generator's outcome labels, and stronger/more
+  consistent play is intrinsically more predictable, so part of the
+  drop is label quality, not head quality. Same caveat for policy CE
+  (~0.723 vs the old ~0.9585 soft floor — muzero visit targets are
+  much more peaked, so the entropy floor itself is lower).
+- The no-overfit result FITS the label-noise story: the U-curve was
+  the value head memorizing outcome noise in weak self-play; muzero
+  games have less of it. (It also retro-explains why bigger corpora
+  only *softened* the U-curve before — more noise to average, same
+  noise level per game.)
+- Ops: resumed leg 15.5k→20k ran ~21 s/100 epochs, `training done
+  [1006 s]`.
+
+**Next: Stage 3 raw gate, gen-8d_mz (20k net) vs gen-7 champion
+(`7b_es`), two seeds, 300 pairs, fingerprints first.** Teacher margin
+was +10.5; the loss table says the net absorbed the sharper targets —
+the gate says whether it converts.

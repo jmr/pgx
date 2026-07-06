@@ -192,11 +192,13 @@ need TWO model instances.
 0. **NEXT (2026-07-06): gen-9 direction — probe DONE, Option A
    CLOSED.** No mctx config beats gen-7 raw (JTR-mirror K=45×64:
    −1.1 ns; depth control K=8×360: −9.8***), yet JTR's searcher gets
-   +10.15 from the same net at the same budget. Next action is A′:
-   read JTR's `--pgx-policy` search code to identify the delta
-   (rollout-blended leaf evals vs selection/backup mechanics); B
-   (capacity on the existing corpus) is the parallel internal lever.
-   Full option table: log 2026-07-06 entry + plan NEXT block.
+   +10.15 from the same net at the same budget. A′ SCOPED by code
+   reading (log 2026-07-06): JTR uses the pgx value head at leaves
+   (no rollouts in card play) through classical full-width PUCT —
+   next action is the `mctx.muzero_policy` swap in `jass_puct.py` +
+   re-run of the K=45×64 probe. B (capacity on the existing corpus)
+   is the parallel internal lever. Full option table: log 2026-07-06
+   entries + plan NEXT block.
 1. **DONE 2026-07-05: JTR arena chapter.** Export + PUCT calibration
    (gap to POWERFUL = ZERO) + raw arena (`--pgx-raw`, JTR change
    `qzzrmuqy`): externally PUCT > raw +10.15 and raw < POWERFUL

@@ -1550,3 +1550,52 @@ lever with a MEASURED +10 behind it); **B** — capacity scaling on the
 existing 64k corpus (unchanged, still zero collection cost); **C** —
 Gumbel `action_weights` targets (unchanged but expectations capped:
 no internal config shows play-strength margin to distill).
+
+## 2026-07-06 — A′ scoped by reading JTR's search code: leaf evals are the pgx VALUE HEAD (rollout hypothesis refuted for card play); the deltas are CLASSICAL FULL-WIDTH PUCT and heuristic-playout TRUMP search
+
+Read the `--pgx-policy` path in JTR (MCTS.java, JassBoard.java,
+MCTSHelper.kt, PgxPlayoutSelectionPolicy.java, StrengthLevel.kt). What
+JTR's search actually does with the exported net:
+
+- **Card-play leaf evaluation = the pgx value head, NOT rollouts.**
+  `playout()` short-circuits on `board.hasScoreEstimator()` →
+  `JassBoard.estimateScore()` → `pgxEstimator.predictValue(game)`
+  (signed differential mapped to per-player points). MCTSHelper logs
+  "Using pgx PolicyValueNet value head to determine the score". So the
+  external +10.15 is extracted from the SAME two signals (policy prior
+  + value leaf) the internal search uses — the rollout-ground-truth
+  hypothesis is REFUTED for card play.
+- **EXCEPT trump selection: `hasScoreEstimator()` is false there** —
+  trump-phase search runs real playouts via
+  `PgxPlayoutSelectionPolicy.runPlayout`, which delegates to the HEAVY
+  RULE-BASED heuristic. So the PUCT arm's trump decisions are searched
+  with JTR's expert rules while the raw arm's trump comes from the
+  policy head. A candidate channel for part of the +10 — and one that
+  imports JTR domain knowledge (adjacent to the no-JTR-games-in-
+  training DECISION if ever used as a teacher).
+- **Selection = classical full-width PUCT, no Gumbel:**
+  `findChildrenPuct`: Q = mean backed-up score in POINTS (0–157,
+  unvisited = 0), U = `puctC`(=100, "scaled for 0–157 reward range") ×
+  P(s,a) × √(N_parent+1)/(1+n), full softmax prior from the policy
+  head cached once per node, every legal child considered every visit.
+  No sequential halving, no completed-Q, no 16-action root cap.
+- **Budget confirmed:** SWEEP_64 = factor 5 → (9−round)×5
+  determinizations (45 at trick 0, declining to 5) × 640/10 = 64
+  runs/det. Matches the 2,880-expansions-at-trick-0 arithmetic; note
+  the internal probe held K=45 constant across all tricks, JTR
+  doesn't. Historical note in StrengthLevel.kt: the sweep was built to
+  find where soft-prior PUCT beats the raw prior ("pgx crossover was
+  ~sims 40-50, healthy by ~128").
+
+**Discriminating next step (the new Option A′ probe): swap
+`mctx.gumbel_muzero_policy` → `mctx.muzero_policy` in `jass_puct.py`**
+(classical PUCT selection, full width; set
+`dirichlet_fraction=0` for a deterministic teacher probe, tune
+`pb_c_init` toward JTR's effective c — values are in points internally
+too, v_scale=100) and re-run the 2026-07-06 K=45×64 probe unchanged.
+- Reproduces ≈ +8–10 → the improvement operator is re-opened INSIDE
+  pgx with net-only signals; gen-9 = collect with muzero_policy
+  targets (and dose-response goes live).
+- Still ≈ 0 → the +10 lives in the trump-phase heuristic playouts or
+  the harness; next discriminator is a JTR arena arm with trump forced
+  to the policy head on both sides.

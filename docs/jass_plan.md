@@ -79,13 +79,16 @@ Yet JTR's searcher extracts **+10.15** from the same net at the same
 budget — a stronger-than-raw teacher EXISTS, in JTR's search
 mechanics or harness, not in mctx sims/worlds. Live candidates:
 
-- **A′. Import the JTR searcher delta** — read JTR's `--pgx-policy`
-  search code first (zero compute): rollout-blended leaf evals would
-  mean the +10 is rollout ground truth correcting the value head
-  (→ prototype rollout-backed collection targets); pure net
-  priors+value would mean selection/backup mechanics (→ mirror in
-  `mctx.muzero_policy` and re-run the probe). The only lever with a
-  measured +10 behind it.
+- **A′. Import the JTR searcher delta — SCOPED (2026-07-06, log):**
+  JTR's card-play leaf evals are the pgx VALUE HEAD (not rollouts),
+  so the +10 comes from net-only signals through CLASSICAL FULL-WIDTH
+  PUCT (points-scale Q, puctC=100, no Gumbel halving) — except trump
+  selection, which searches with JTR's rule-based heuristic playouts.
+  Next: swap `mctx.gumbel_muzero_policy` → `mctx.muzero_policy`
+  (`dirichlet_fraction=0`) in `jass_puct.py`, re-run the K=45×64
+  probe. Wins → gen-9 collects with muzero_policy targets. Still ~0 →
+  the +10 is the trump-phase heuristic (JTR-knowledge caveat) or
+  harness. The only lever with a measured +10 behind it.
 - **B. Net capacity scaling** — bigger attn on the existing 64k gen-7
   corpus; zero collection cost, gen-6b precedent, but fixed-point
   targets may cap it.

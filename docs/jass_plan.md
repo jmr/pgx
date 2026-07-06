@@ -63,9 +63,11 @@ significant)**; PUCT@64 deployed check **FLAT (+1.1 ns)**.
    ~1.8 h to ~2 min); collection is perfect-info, so the external
    flip does not affect it.
 
-**NEXT: gen-9 direction.** gen-8 is CLOSED (2026-07-05): both arms —
-8b_es (early stop @10k) and 8c_wd (weight decay 1e-2, full 20k) —
-gated WASH vs gen-7. **A same-size self-distillation round is a FIXED
+**NEXT: gen-8, RETAKEN with the muzero teacher — student
+gen-8d_mz_es** (a generation isn't abandoned when attempts fail;
+attempts get suffixes — naming entry 2026-07-06). The regularization
+attempts are CLOSED (2026-07-05): both arms — 8b_es (early stop
+@10k) and 8c_wd (weight decay 1e-2, full 20k) — gated WASH vs gen-7. **A same-size self-distillation round is a FIXED
 POINT at gen-7**; weight decay is shelved and early stopping stays
 the recipe until something re-opens the climb.
 
@@ -85,7 +87,8 @@ sharpening probe, gauge-ZERO, the gen-8 fixed point) was measured
 through Gumbel-read-by-summed-visits and is REINTERPRETED as "the
 net outgrew small-sim Gumbel", not "self-play is exhausted".
 
-**gen-9 = the muzero-teacher crank (DECISION 2026-07-06, log):**
+**The gen-8 retake = the muzero-teacher crank (DECISION 2026-07-06,
+log; corpus anchor SRC="7b_es_mz"):**
 
 1. **Pre-collection probe DONE (2026-07-06, log): the margin holds
    cheap** — K=16×64 reads +10.5 (≈91% of the JTR-budget margin at
@@ -99,10 +102,16 @@ net outgrew small-sim Gumbel", not "self-play is exhausted".
 3. **Dose-response goes LIVE** (stronger targets may need fewer
    games; it carries the corpus-size DECISION for the new recipe).
 
-Parked: B (capacity scaling — revisit if the muzero crank stalls),
-C (Gumbel target knobs — moot while muzero is the teacher). Ruled
-out: mctx-Gumbel budget/worlds, more regularization, JTR games as
-targets (standing DECISION), Step-5 imperfect-info.
+Parked: B (capacity scaling — revisit if the muzero crank stalls);
+C′ (Gumbel with its NATIVE readout — the visit-count readout was an
+impedance mismatch, see the 2026-07-06 searcher post-mortem; the
+correct integration averages `out.action_weights` across the K
+worlds instead of summing visits. An efficiency play, not a strength
+play: probe post-gate whether it matches muzero at ~16 sims/det —
+if so, Stage 1 gets ~4× cheaper. Needs a `readout=` knob in
+`puct_search`). Ruled out: mctx-Gumbel-by-visits budget/worlds, more
+regularization, JTR games as targets (standing DECISION), Step-5
+imperfect-info.
 
 ## Previous snapshot (2026-07-03)
 

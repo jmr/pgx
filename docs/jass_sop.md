@@ -189,12 +189,13 @@ need TWO model instances.
   (the old 0.13–0.14 band is the *old architecture's* level).
 **Queued work (order decided end-of-session 2026-07-04):**
 
-0. **NEXT (2026-07-06): gen-9 = the muzero-teacher crank — the
+0. **NEXT (2026-07-06): the gen-8 RETAKE (student gen-8d_mz_es,
+   corpus anchor SRC="7b_es_mz") = the muzero-teacher crank — the
    operator is RE-OPENED.** `search_variant="muzero"` (classical
    PUCT via `mctx.muzero_policy`, landed `sxznyotm`) beats gen-7 raw
    **+11.8*** at K=45×64** where Gumbel read −1.1 ns — same budget,
    same net, same deals; pb_c plateau 0.64–2.5. Pre-collection probe
-   DONE: the margin holds cheap — **gen-9 collection config =
+   DONE: the margin holds cheap — **SRC=7b_es_mz collection config =
    `search_variant="muzero", pb_c_init=1.25, num_determinizations=16,
    num_simulations=64`** (+10.5 at the standing 1,024-exp/move cost;
    worlds-over-depth: 8×128 only +7.1), `dirichlet_fraction=0`,

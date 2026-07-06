@@ -1687,3 +1687,20 @@ num_determinizations=16, num_simulations=64)`, τ=1.0,
 clock may even improve (half the sequential sims at 2× the leaf-eval
 batch). Teacher margin +10.5 is gen-4-band fuel (+11.1 → +15 raw
 gate) — the first real teacher signal since gen-6b.
+
+## 2026-07-06 — NAMING: the muzero round is GEN-8 retaken (student gen-8d_mz_es), anchored SRC="7b_es_mz"
+
+The generator is still the gen-7 champion, so this is gen-8 — **a
+generation isn't abandoned when attempts fail; attempts get
+suffixes** ("gen-9" in the 2026-07-06 entries above refers to this
+round; a generation may take many attempts). Student net:
+**gen-8d_mz_es** (d = next free attempt letter after the washed
+8b_es/8c_wd; mz = muzero teacher, es = early-stopped per the
+standing recipe). Anchor: the round's
+`SRC` token is **`7b_es_mz`** — the champion's own label (`7b_es`)
+plus the teacher-recipe tag (`mz`) — so every SOP-derived f-string
+filename (corpus shards, checkpoint, final net) is self-describing
+about generator AND recipe; the champion PARAMS file stays `7b_es`
+(no `_mz` — load it via a separate CHAMP token). Corpus kept BIG on
+purpose — 32×2048 like the washed arms — so the searcher swap is the
+ONLY change.

@@ -3,6 +3,8 @@ import jax.numpy as jnp
 
 from pgx._src.games.jass import DECLARE_OFFSET, Game, MODE_SCORES
 from pgx._src.games.jass_puct import (
+    _pv_eval,
+    _rollout_value,
     make_puct_action_fn,
     make_puct_collect_fn,
     puct_action,
@@ -104,6 +106,64 @@ def test_puct_collect_fn_contract():
     assert jnp.allclose(jnp.where(alive, pi.sum(-1), 1.0), 1.0, atol=1e-5)
     assert not jnp.any((pi > 0) & ~legal & alive[..., None])
     assert jnp.all(jnp.abs(labels) <= 157)
+
+
+def _batch_states(n, seed=0, past_trump=True):
+    states = jax.vmap(game.init)(
+        jax.random.split(jax.random.PRNGKey(seed), n))
+    if past_trump:
+        states = jax.vmap(game.step)(
+            states, jnp.full((n,), DECLARE_OFFSET, jnp.int32))
+    return states
+
+
+def test_rollout_value_terminates_and_is_bounded():
+    states = _batch_states(4)
+    vals = jax.jit(_rollout_value)(states, jax.random.PRNGKey(0))
+    assert vals.shape == (4,)
+    # Real point differentials: bounded by the 157-point game total.
+    assert jnp.all(jnp.abs(vals) <= 157)
+
+
+def test_prior_mix_uniform_flattens_priors():
+    pv_apply, params = _pv()
+    states = _batch_states(2)
+    _, _, legal = _pv_eval(pv_apply, params, states, 100.0)
+    logits_flat, value_flat, _ = _pv_eval(
+        pv_apply, params, states, 100.0, prior_mix_uniform=1.0)
+    # λ=1: uniform over legal — all legal logits equal, illegal masked.
+    probs = jax.nn.softmax(logits_flat, axis=-1)
+    expected = legal / legal.sum(-1, keepdims=True)
+    assert jnp.allclose(probs, expected, atol=1e-5)
+    # Value path untouched by the prior knob.
+    _, value_ref, _ = _pv_eval(pv_apply, params, states, 100.0)
+    assert jnp.allclose(value_flat, value_ref)
+
+
+def test_rollout_value_weight_full_replaces_value_head():
+    pv_apply, params = _pv()
+    states = _batch_states(2)
+    key = jax.random.PRNGKey(3)
+    logits_ref, _, _ = _pv_eval(pv_apply, params, states, 100.0)
+    logits, value, _ = _pv_eval(
+        pv_apply, params, states, 100.0,
+        rollout_value_weight=1.0, rollout_key=key)
+    # w=1: value is exactly the rollout return; priors untouched.
+    assert jnp.allclose(value, _rollout_value(states, key))
+    assert jnp.allclose(logits, logits_ref)
+
+
+def test_puct_action_grounded_knobs_legal():
+    """The classical (net-free) configuration searches and moves legally."""
+    pv_apply, params = _pv()
+    state = game.init(jax.random.PRNGKey(0))
+    state = game.step(state, jnp.int32(DECLARE_OFFSET))
+    action = puct_action(state, state.current_player, jax.random.PRNGKey(0),
+                         params, pv_apply,
+                         num_determinizations=2, num_simulations=8,
+                         search_variant="muzero",
+                         prior_mix_uniform=1.0, rollout_value_weight=1.0)
+    assert bool(game.legal_action_mask(state)[action])
 
 
 def test_puct_sign_conventions_beat_random():

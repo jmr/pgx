@@ -9,6 +9,12 @@ as the dynamics. The K trees are aggregated by SUMMING ROOT
 VISIT COUNTS and acting on the summed counts — the load-bearing choice from
 docs/jass_plan.md (Q-sum aggregation neutralizes the tree policy).
 
+Grounded-teacher knobs (2026-07-06, the gen-9 fixed-point escape —
+see the plan's NEXT block): `prior_mix_uniform` mixes the net's priors
+toward uniform-over-legal at every node; `rollout_value_weight` blends
+leaf values toward a uniform-random playout-to-terminal return (real
+points). At 1.0/1.0 the search is a classical, net-free ISMCTS.
+
 Sign conventions (mctx backs up q(parent, a) = reward + discount * v(child)):
 - every node's value is from the perspective of the player to move there
   (the net's value is already acting-player-relative);
@@ -45,8 +51,52 @@ def _hold_if(done: Array, old: GameState, new: GameState) -> GameState:
     )
 
 
-def _pv_eval(pv_apply, pv_params, states: GameState, v_scale: float):
+def _rollout_value(states: GameState, key: Array) -> Array:
+    """Uniform-random playout to terminal; points for each state's mover.
+
+    The classical (grounded) leaf evaluation: play random legal moves to
+    the end of the game and score the real outcome from the perspective
+    of the player to move at `states` — no learned function involved.
+    Already-terminal states are held in place and scored as they stand
+    (callers zero terminal values, matching `_pv_eval`'s convention).
+    """
+    movers = states.current_player                       # (B,)
+
+    def cond(carry):
+        s, _ = carry
+        return jnp.any(s.trick_num < 9)
+
+    def body(carry):
+        s, k = carry
+        k, k_act = jax.random.split(k)
+        legal = jax.vmap(_game.legal_action_mask)(s)     # (B, 43)
+        action = jax.random.categorical(
+            k_act, jnp.where(legal, 0.0, _ILLEGAL))      # (B,)
+        done = s.trick_num >= 9
+        next_s = jax.vmap(_game.step)(s, action.astype(jnp.int32))
+        return _hold_if(done, s, next_s), k
+
+    final, _ = jax.lax.while_loop(cond, body, (states, key))
+    rewards = jax.vmap(_game.rewards)(final)             # (B, 4)
+    return jnp.take_along_axis(
+        rewards, movers[:, None], axis=1).squeeze(-1)
+
+
+def _pv_eval(
+    pv_apply,
+    pv_params,
+    states: GameState,
+    v_scale: float,
+    prior_mix_uniform: float = 0.0,
+    rollout_value_weight: float = 0.0,
+    rollout_key: Array = None,
+):
     """Evaluate the net on a batch of states from each mover's perspective.
+
+    prior_mix_uniform / rollout_value_weight are the grounded-teacher
+    knobs (2026-07-06 fixed-point escape; see docs/jass_plan.md). Both
+    must be trace-time Python floats: they gate computation with `if`,
+    so a value of 0.0 costs nothing.
 
     Returns:
         logits: (B, 43) masked to the legal actions of each state.
@@ -57,16 +107,30 @@ def _pv_eval(pv_apply, pv_params, states: GameState, v_scale: float):
     logits, value = pv_apply(pv_params, cm, hd)
     legal = jax.vmap(_game.legal_action_mask)(states)
     logits = jnp.where(legal, logits, _ILLEGAL)
+    if prior_mix_uniform:
+        lam = prior_mix_uniform
+        probs = jax.nn.softmax(logits, axis=-1)
+        n_legal = legal.sum(axis=-1, keepdims=True).clip(1)
+        uniform = jnp.where(legal, 1.0 / n_legal, 0.0)
+        logits = jnp.where(
+            legal,
+            jnp.log(((1.0 - lam) * probs + lam * uniform).clip(1e-9)),
+            _ILLEGAL)
+    value = value * v_scale
+    if rollout_value_weight:
+        w = rollout_value_weight
+        value = (1.0 - w) * value + w * _rollout_value(states, rollout_key)
     done = states.trick_num >= 9
-    value = jnp.where(done, 0.0, value * v_scale)
+    value = jnp.where(done, 0.0, value)
     return logits, value, legal
 
 
-def _make_recurrent_fn(pv_apply, v_scale: float):
+def _make_recurrent_fn(pv_apply, v_scale: float,
+                       prior_mix_uniform: float = 0.0,
+                       rollout_value_weight: float = 0.0):
     """Build the mctx recurrent_fn over batched GameState embeddings."""
 
     def recurrent_fn(params, rng_key, action, states: GameState):
-        del rng_key
         prev_player = states.current_player           # (B,)
         prev_done = states.trick_num >= 9             # (B,)
 
@@ -80,7 +144,11 @@ def _make_recurrent_fn(pv_apply, v_scale: float):
             rewards, prev_player[:, None], axis=1).squeeze(-1)
         reward = jnp.where(prev_done, 0.0, reward)
 
-        logits, value, _ = _pv_eval(pv_apply, params, next_states, v_scale)
+        logits, value, _ = _pv_eval(
+            pv_apply, params, next_states, v_scale,
+            prior_mix_uniform=prior_mix_uniform,
+            rollout_value_weight=rollout_value_weight,
+            rollout_key=rng_key)
 
         done = next_states.trick_num >= 9
         same_team = (next_states.current_player % 2) == (prev_player % 2)
@@ -111,6 +179,8 @@ def puct_search(
     search_variant: str = "gumbel",
     pb_c_init: float = 1.25,
     dirichlet_fraction: float = 0.0,
+    prior_mix_uniform: float = 0.0,
+    rollout_value_weight: float = 0.0,
 ) -> tuple[Array, Array]:
     """Run K determinized tree searches and sum root visit counts.
 
@@ -134,6 +204,16 @@ def puct_search(
         dirichlet_fraction: Root Dirichlet-noise share. Muzero variant
             only; 0.0 (default) = deterministic teacher, AlphaZero
             self-play uses 0.25.
+        prior_mix_uniform: λ share of uniform-over-legal mixed into the
+            net's priors at the root and every tree node; 1.0 = flat
+            (uniform-prior) PUCT. Grounded-teacher knob (2026-07-06):
+            breaks the prior half of the search(π)≈π self-confirmation.
+        rollout_value_weight: w share of a uniform-random playout-to-
+            terminal return (real points) blended into every leaf value;
+            1.0 replaces the value head entirely (classical evaluation).
+            Breaks the value half of the self-confirmation. Costs up to
+            38 extra env steps per node expansion. Both knobs must be
+            Python floats at trace time (0.0 compiles to a no-op).
 
     Returns:
         (visit_counts, legal): (43,) float32 root visit counts summed over
@@ -141,12 +221,16 @@ def puct_search(
         mask of the information state.
     """
     K = num_determinizations
-    det_key, search_key = jax.random.split(key)
+    det_key, search_key, root_key = jax.random.split(key, 3)
     det_states = jax.vmap(
         lambda k: sample_determinization(state, player_id, k)
     )(jax.random.split(det_key, K))                      # (K,) GameState
 
-    logits, value, _ = _pv_eval(pv_apply, pv_params, det_states, v_scale)
+    logits, value, _ = _pv_eval(
+        pv_apply, pv_params, det_states, v_scale,
+        prior_mix_uniform=prior_mix_uniform,
+        rollout_value_weight=rollout_value_weight,
+        rollout_key=root_key)
     root = mctx.RootFnOutput(
         prior_logits=logits, value=value, embedding=det_states)
 
@@ -155,12 +239,14 @@ def puct_search(
     legal = _game.legal_action_mask(state)               # (43,)
     invalid = jnp.broadcast_to(~legal, (K, NUM_ACTIONS))
 
+    recurrent_fn = _make_recurrent_fn(
+        pv_apply, v_scale, prior_mix_uniform, rollout_value_weight)
     if search_variant == "gumbel":
         out = mctx.gumbel_muzero_policy(
             params=pv_params,
             rng_key=search_key,
             root=root,
-            recurrent_fn=_make_recurrent_fn(pv_apply, v_scale),
+            recurrent_fn=recurrent_fn,
             num_simulations=num_simulations,
             invalid_actions=invalid.astype(jnp.float32),
             max_num_considered_actions=max_num_considered_actions,
@@ -170,7 +256,7 @@ def puct_search(
             params=pv_params,
             rng_key=search_key,
             root=root,
-            recurrent_fn=_make_recurrent_fn(pv_apply, v_scale),
+            recurrent_fn=recurrent_fn,
             num_simulations=num_simulations,
             invalid_actions=invalid.astype(jnp.float32),
             pb_c_init=pb_c_init,
@@ -186,7 +272,8 @@ def puct_search(
 
 @functools.partial(jax.jit, static_argnames=(
     "pv_apply", "num_determinizations", "num_simulations",
-    "max_num_considered_actions", "search_variant"))
+    "max_num_considered_actions", "search_variant",
+    "prior_mix_uniform", "rollout_value_weight"))
 def puct_action(
     state: GameState,
     player_id: Array,
@@ -200,13 +287,15 @@ def puct_action(
     search_variant: str = "gumbel",
     pb_c_init: float = 1.25,
     dirichlet_fraction: float = 0.0,
+    prior_mix_uniform: float = 0.0,
+    rollout_value_weight: float = 0.0,
 ) -> Array:
     """Greedy PUCT move: argmax of summed root visits (ties → first legal)."""
     visits, legal = puct_search(
         state, player_id, key, pv_params, pv_apply,
         num_determinizations, num_simulations, v_scale,
         max_num_considered_actions, search_variant, pb_c_init,
-        dirichlet_fraction)
+        dirichlet_fraction, prior_mix_uniform, rollout_value_weight)
     scored = jnp.where(legal, visits, -jnp.inf)
     return jnp.argmax(scored).astype(jnp.int32)
 
@@ -222,6 +311,8 @@ def make_puct_policy_fn(
     search_variant: str = "gumbel",
     pb_c_init: float = 1.25,
     dirichlet_fraction: float = 0.0,
+    prior_mix_uniform: float = 0.0,
+    rollout_value_weight: float = 0.0,
     temperature: float = None,
 ):
     """Build a policy_fn(state, key) → (action, pi) for jass_selfplay.
@@ -239,7 +330,7 @@ def make_puct_policy_fn(
             state, state.current_player, k_search, pv_params, pv_apply,
             num_determinizations, num_simulations, v_scale,
             max_num_considered_actions, search_variant, pb_c_init,
-            dirichlet_fraction)
+            dirichlet_fraction, prior_mix_uniform, rollout_value_weight)
         pi = visits / visits.sum().clip(1.0)
         if temperature is None:
             action = jnp.argmax(jnp.where(legal, visits, -jnp.inf))
@@ -274,6 +365,8 @@ def make_puct_collect_fn(
     search_variant: str = "gumbel",
     pb_c_init: float = 1.25,
     dirichlet_fraction: float = 0.0,
+    prior_mix_uniform: float = 0.0,
+    rollout_value_weight: float = 0.0,
     temperature: float = 1.0,
 ):
     """Build a collect_fn(key, batch_size) generating PUCT self-play data.
@@ -297,6 +390,8 @@ def make_puct_collect_fn(
             search_variant=search_variant,
             pb_c_init=pb_c_init,
             dirichlet_fraction=dirichlet_fraction,
+            prior_mix_uniform=prior_mix_uniform,
+            rollout_value_weight=rollout_value_weight,
             temperature=temperature)
         return _collect_pv(policy_fn, key, batch_size)
 

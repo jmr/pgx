@@ -1,9 +1,11 @@
 """Determinized PUCT for Jass via mctx (Option B) — the AlphaZero search.
 
 For each of K determinizations of the current information state, run a
-batched Gumbel-MuZero tree search (`mctx.gumbel_muzero_policy`) with the
-PolicyValueNet supplying priors and leaf values, and the real game engine
-(`Game.step`) as the dynamics. The K trees are aggregated by SUMMING ROOT
+batched tree search — `mctx.gumbel_muzero_policy` by default, or classical
+full-width PUCT via `mctx.muzero_policy` (`search_variant="muzero"`, the
+JTR-style operator; A′ probe 2026-07-06) — with the PolicyValueNet
+supplying priors and leaf values, and the real game engine (`Game.step`)
+as the dynamics. The K trees are aggregated by SUMMING ROOT
 VISIT COUNTS and acting on the summed counts — the load-bearing choice from
 docs/jass_plan.md (Q-sum aggregation neutralizes the tree policy).
 
@@ -106,8 +108,11 @@ def puct_search(
     num_simulations: int = 64,
     v_scale: float = 100.0,
     max_num_considered_actions: int = 16,
+    search_variant: str = "gumbel",
+    pb_c_init: float = 1.25,
+    dirichlet_fraction: float = 0.0,
 ) -> tuple[Array, Array]:
-    """Run K determinized Gumbel-MuZero searches and sum root visit counts.
+    """Run K determinized tree searches and sum root visit counts.
 
     Args:
         state: Current (true or self-play) game state.
@@ -118,7 +123,17 @@ def puct_search(
         num_simulations: Tree simulations per determinization.
         v_scale: Net output → points (TARGET_SCALE of the training run).
         max_num_considered_actions: Gumbel sequential-halving width at the
-            root.
+            root. Gumbel variant only.
+        search_variant: "gumbel" (default, `mctx.gumbel_muzero_policy` —
+            the standing collector) or "muzero" (`mctx.muzero_policy`,
+            classical full-width PUCT — the JTR-style operator, A′ probe
+            2026-07-06).
+        pb_c_init: Classical-PUCT exploration constant on mctx's
+            per-node-normalized Q. Muzero variant only. JTR's c=100 on
+            the raw 0–157 point scale ≈ 0.64 here.
+        dirichlet_fraction: Root Dirichlet-noise share. Muzero variant
+            only; 0.0 (default) = deterministic teacher, AlphaZero
+            self-play uses 0.25.
 
     Returns:
         (visit_counts, legal): (43,) float32 root visit counts summed over
@@ -140,15 +155,29 @@ def puct_search(
     legal = _game.legal_action_mask(state)               # (43,)
     invalid = jnp.broadcast_to(~legal, (K, NUM_ACTIONS))
 
-    out = mctx.gumbel_muzero_policy(
-        params=pv_params,
-        rng_key=search_key,
-        root=root,
-        recurrent_fn=_make_recurrent_fn(pv_apply, v_scale),
-        num_simulations=num_simulations,
-        invalid_actions=invalid.astype(jnp.float32),
-        max_num_considered_actions=max_num_considered_actions,
-    )
+    if search_variant == "gumbel":
+        out = mctx.gumbel_muzero_policy(
+            params=pv_params,
+            rng_key=search_key,
+            root=root,
+            recurrent_fn=_make_recurrent_fn(pv_apply, v_scale),
+            num_simulations=num_simulations,
+            invalid_actions=invalid.astype(jnp.float32),
+            max_num_considered_actions=max_num_considered_actions,
+        )
+    elif search_variant == "muzero":
+        out = mctx.muzero_policy(
+            params=pv_params,
+            rng_key=search_key,
+            root=root,
+            recurrent_fn=_make_recurrent_fn(pv_apply, v_scale),
+            num_simulations=num_simulations,
+            invalid_actions=invalid.astype(jnp.float32),
+            pb_c_init=pb_c_init,
+            dirichlet_fraction=dirichlet_fraction,
+        )
+    else:
+        raise ValueError(f"unknown search_variant: {search_variant!r}")
 
     visits = out.search_tree.summary().visit_counts      # (K, 43)
     visits = jnp.where(legal, visits.sum(axis=0), 0.0)   # (43,)
@@ -157,7 +186,7 @@ def puct_search(
 
 @functools.partial(jax.jit, static_argnames=(
     "pv_apply", "num_determinizations", "num_simulations",
-    "max_num_considered_actions"))
+    "max_num_considered_actions", "search_variant"))
 def puct_action(
     state: GameState,
     player_id: Array,
@@ -168,12 +197,16 @@ def puct_action(
     num_simulations: int = 64,
     v_scale: float = 100.0,
     max_num_considered_actions: int = 16,
+    search_variant: str = "gumbel",
+    pb_c_init: float = 1.25,
+    dirichlet_fraction: float = 0.0,
 ) -> Array:
     """Greedy PUCT move: argmax of summed root visits (ties → first legal)."""
     visits, legal = puct_search(
         state, player_id, key, pv_params, pv_apply,
         num_determinizations, num_simulations, v_scale,
-        max_num_considered_actions)
+        max_num_considered_actions, search_variant, pb_c_init,
+        dirichlet_fraction)
     scored = jnp.where(legal, visits, -jnp.inf)
     return jnp.argmax(scored).astype(jnp.int32)
 
@@ -186,6 +219,9 @@ def make_puct_policy_fn(
     num_simulations: int = 64,
     v_scale: float = 100.0,
     max_num_considered_actions: int = 16,
+    search_variant: str = "gumbel",
+    pb_c_init: float = 1.25,
+    dirichlet_fraction: float = 0.0,
     temperature: float = None,
 ):
     """Build a policy_fn(state, key) → (action, pi) for jass_selfplay.
@@ -202,7 +238,8 @@ def make_puct_policy_fn(
         visits, legal = puct_search(
             state, state.current_player, k_search, pv_params, pv_apply,
             num_determinizations, num_simulations, v_scale,
-            max_num_considered_actions)
+            max_num_considered_actions, search_variant, pb_c_init,
+            dirichlet_fraction)
         pi = visits / visits.sum().clip(1.0)
         if temperature is None:
             action = jnp.argmax(jnp.where(legal, visits, -jnp.inf))
@@ -234,6 +271,9 @@ def make_puct_collect_fn(
     num_simulations: int = 64,
     v_scale: float = 100.0,
     max_num_considered_actions: int = 16,
+    search_variant: str = "gumbel",
+    pb_c_init: float = 1.25,
+    dirichlet_fraction: float = 0.0,
     temperature: float = 1.0,
 ):
     """Build a collect_fn(key, batch_size) generating PUCT self-play data.
@@ -254,6 +294,9 @@ def make_puct_collect_fn(
             num_simulations=num_simulations,
             v_scale=v_scale,
             max_num_considered_actions=max_num_considered_actions,
+            search_variant=search_variant,
+            pb_c_init=pb_c_init,
+            dirichlet_fraction=dirichlet_fraction,
             temperature=temperature)
         return _collect_pv(policy_fn, key, batch_size)
 

@@ -11,7 +11,23 @@ conclusions and pointers). The per-generation procedure is `docs/jass_sop.md`.
 
 ## Status snapshot (2026-07-06)
 
-**CHAMPION: gen-8d_mz (`pv_gen8d_mz.msgpack`) — PROMOTED 2026-07-06,
+**CHAMPION: gen-9 (`pv_gen9_s128.msgpack`) — PROMOTED 2026-07-06,
+raw +2.8/+4.2 vs gen-8d_mz, both seeds significant (t p=0.0211 /
+0.0005).** Same muzero recipe as gen-8d_mz (32×2048, K=16×64,
+pb_c=1.25), only the generator advanced to the new champion; full
+20k, NO U-curve again, loss floors dropped further (holdout v 0.0655,
+policy CE 0.604). **But the step collapsed ~4–5× vs gen-8d_mz's
++13.7/+11.0** — the first same-recipe iteration, so the big jump was
+the one-time teacher-swap unlock and iterating the fixed recipe now
+yields a thin gen-over-gen gain. **DECELERATION FLAG: re-run the
+operator probe (muzero vs gen-9 raw) before committing gen-10 to the
+same recipe** — margin holds → run as-is; margin compressed → change
+a lever (B capacity / corpus size). JTR re-calibration still owed
+(two promotions banked; can raw match POWERFUL?); dose-response owed.
+
+## Previous snapshot (2026-07-06 — gen-8d_mz)
+
+**gen-8d_mz (`pv_gen8d_mz.msgpack`) — PROMOTED 2026-07-06,
 raw +13.7/+11.0 vs gen-7, both seeds p<0.0001.** The muzero-teacher
 retake of gen-8: same net, same 32×2048 corpus size, ONE change vs
 the two washed attempts — the collection searcher
@@ -20,9 +36,7 @@ the two washed attempts — the collection searcher
 0.074 vs the old 0.111–0.113 floors), so no `_es` suffix. The
 operator, the training curve, and the gate all confirm the same
 mechanism: the Gumbel-visits teacher was the binding constraint —
-see the 2026-07-06 log arc. NEXT: gen-9 on the same recipe with
-gen-8d_mz as generator; JTR re-calibration owed (can raw now match
-POWERFUL?); dose-response carries the corpus-size decision.
+see the 2026-07-06 log arc.
 
 ## Previous snapshot (2026-07-05)
 

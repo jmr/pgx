@@ -1771,3 +1771,77 @@ Gumbel-visits teacher was the binding constraint on the whole loop.
    corpus-size DECISION for the muzero recipe.
 4. Parked: C′ gumbel-native-readout efficiency probe; B capacity
    scaling.
+
+## 2026-07-06 — gen-9 full 20k train on the gen-8d_mz muzero corpus: NO U-curve AGAIN, loss floors drop further (v 0.0655, p 0.604)
+
+Stage 2 on the gen-9 corpus (SRC=8d_mz, 32×2048, muzero K=16×64
+teacher — the SAME recipe as gen-8d_mz, only the generator advanced
+to the new champion), standard recipe, full 20k, 76,543 holdout
+positions:
+
+- **No overfit onset again through 20k** — eval falls monotonically
+  to the end (0.6694 @18.8k, 0.6701 @19.9k, still drifting down),
+  train≈eval gap ~0.005. Second consecutive muzero-corpus run with no
+  U-curve; the label-noise story holds — the muzero generator makes
+  clean outcome labels, so early stopping stays unnecessary and the
+  gate candidate is the 20k net (no `_es`).
+- **Holdout value loss v ≈ 0.0655** — even below gen-8d_mz's 0.074.
+  Same caveat: a stronger, more consistent generator produces
+  more-predictable outcomes, so part of the drop is label quality.
+- **Policy CE p ≈ 0.604** vs gen-8d_mz's 0.723 — targets even more
+  peaked (the gen-8d_mz teacher net now drives sharper muzero visit
+  distributions than the gen-7 teacher did).
+- Ops: full 20k from scratch, `training done [4418 s]` (~74 min; the
+  gen-8d_mz 1006 s was only the resumed 15.5k→20k leg).
+
+## 2026-07-06 — gen-9 raw gate vs gen-8d_mz: +2.8/+4.2 both seeds significant — PROMOTED, but the step collapses ~4–5× (crank decelerates)
+
+Stage 3 raw gate (temp 0.05, 300 pairs/seed, fingerprints distinct
+new=29639.75 / src=29546.98 = the gen-8d_mz champion; both labels
+printed "gen-8d_mz raw" — the cosmetic SRC-token bug, but src fp
+29546.98 = gen-8d_mz's own "new" fp from its promotion entry, so the
+baseline IS the new champion):
+
+| seed | W/L | win% | mean/game | t | sign (pairs) |
+|:--|:--|:--|:--|:--|:--|
+| 1 | 305/295 | 50.8% | **+2.8** | +2.319 p=0.0211 * | 151W/88L p=0.0001 *** |
+| 2 | 309/291 | 51.5% | **+4.2** | +3.501 p=0.0005 *** | 145W/104L p=0.0111 * |
+
+- **Verdict: PROMOTED.** Both seeds positive and significant on the
+  pair-mean t-test → gen-9 is CHAMPION and the gen-10 generator. Two
+  consecutive promotions since the teacher swap.
+- **But the step collapsed ~4–5×:** gen-8d_mz beat gen-7 by
+  +13.7/+11.0; gen-9 beats gen-8d_mz by only +2.8/+4.2. This is the
+  first SAME-recipe iteration (new generator, teacher unchanged) — so
+  the +11–14 was the one-time teacher-swap unlock, and iterating the
+  loop on the fixed muzero recipe yields a much thinner gen-over-gen
+  gain. Loss floors kept dropping (v 0.074→0.0655, p 0.723→0.604) but
+  the raw gate barely moved — the net absorbed sharper targets that no
+  longer translate into much extra raw strength vs the (already
+  stronger) previous champion.
+- Sign/mean tension, seed 1: 151W/88L pairs (strongly more wins,
+  p=0.0001) yet mean only +2.8 — gen-9 wins many pairs by small
+  margins and loses fewer-but-larger. Consistent with a small but real
+  edge, not a fluke.
+
+**DECISION (2026-07-06): promote gen-9, but treat +2.8/+4.2 as a
+deceleration flag — re-run the OPERATOR PROBE before committing gen-10
+to the same recipe.** The standing question each round is whether the
+muzero-vs-raw operator margin persists at the new champion; a thin raw
+gate suggests that margin may be compressing too. Probe muzero K=16×64
+vs gen-9 raw:
+- Margin holds (~+10) → the recipe still has fuel; run gen-10 as-is
+  and expect another small step.
+- Margin has compressed → the muzero teacher is nearing saturation
+  against its own student; time to change a lever (B capacity scaling
+  or corpus size) rather than iterate the fixed recipe.
+
+**Queue (unchanged priorities, gen-9 now the generator):**
+1. Operator probe (muzero vs gen-9 raw) — carries the gen-10 recipe
+   decision, per above.
+2. **JTR re-calibration still OWED** — export gen-8d_mz/gen-9; the
+   headline external question (can raw now match POWERFUL with no
+   search?) only got more pressing with two promotions banked.
+3. Dose-response (15-batch student) — corpus-size DECISION.
+4. Parked: C′ gumbel-native-readout probe; B capacity scaling (now a
+   live candidate if the operator probe reads saturation).

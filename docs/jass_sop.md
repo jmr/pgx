@@ -38,8 +38,12 @@ this is the **entire** training set: **the step2 anchor is RETIRED** (its
 50% share caused the gen-5 plateau — see the experiment log). Keep
 `corpus_k8_v1_24x4096` on Drive; never regenerate it, never train on it.
 
-- `make_puct_policy_fn(attn_model.apply, src_params, num_determinizations=8,`
-  `num_simulations=128, temperature=1.0)`, pmap'd over the 8 chips.
+- `make_puct_policy_fn(attn_model.apply, src_params, num_determinizations=16,`
+  `num_simulations=64, search_variant="muzero", pb_c_init=1.25,`
+  `temperature=1.0)`, pmap'd over the 8 chips. **RECIPE CHANGED
+  2026-07-06: the teacher is classical PUCT (muzero_policy), K=16×64**
+  — the Gumbel default washed two gen-8 attempts; ⚠ omitting
+  `search_variant="muzero"` silently collects a fixed-point corpus.
 - **Per-chip batch = 8 games with the attn generator** (profiled
   2026-07-04: 615 ms/game at B=8 vs 684 @4 / 753 @16 — the VMEM knee
   moved 8× vs the old net's B=64, but the optimum ms/game barely moved,
@@ -158,40 +162,42 @@ Diagnostics:
   raw. Large + while PUCT-vs-PUCT is flat = the search is masking real policy
   gains (this is now the standing gate, above).
 
-## Current strategic state (2026-07-04, post-gen-7 promotion)
+## Current strategic state (2026-07-06, post-gen-8d_mz promotion)
 
-**CHAMPION: gen-7 (`pv_gen7_s128.msgpack`) — `PolicyValueNetAttn`,
-64k corpus, early-stopped at 10k.** Promoted 2026-07-04 on raw
-+5.2/+10.2 (both seeds significant); PUCT@64 deployed check FLAT (+1.1
-ns) — search no longer converts raw gains at the deployed config.
-**The operator fuel gauge is RETIRED as a crank gate**: gen-7 climbed
-+5/+10 from a corpus whose generator search measured ZERO margin over
-its own raw policy. Plain numeric GEN/SRC anchors work again (gen-8:
-SRC=7). ⚠ Champion + generator are ATTN: every cell that loads them
-needs `PolicyValueNetAttn().apply`; a `PolicyValueNet` template
-silently mangles the params. Gate cells against pre-attn generations
-need TWO model instances.
+**CHAMPION: gen-8d_mz (`pv_gen8d_mz.msgpack`) — `PolicyValueNetAttn`,
+64k muzero corpus (K=16×64, pb_c=1.25), full 20k (NO early stop
+needed).** Promoted 2026-07-06 on raw +13.7/+11.0 (both seeds ***).
+The teacher searcher is the recipe change that did it: classical
+PUCT (`search_variant="muzero"`) replaced Gumbel-read-by-visits at
+collection — see the 2026-07-06 log arc for the searcher post-mortem
+and the reinterpretation of the retired fuel gauge (it measured
+Gumbel's readout starvation, not teacher exhaustion; the muzero
+operator margin is a MEANINGFUL gauge again — +10.5 at gen-7).
+⚠ Champion + generator are ATTN: every cell that loads them needs
+`PolicyValueNetAttn().apply`; a `PolicyValueNet` template silently
+mangles the params. Gate cells against pre-attn generations need TWO
+model instances.
 
-- **The attn recipe (standing; weight decay SHELVED 2026-07-05 — both
-  gen-8 arms gated WASH vs gen-7): EARLY-STOP at
-  the corpus-size-dependent U-minimum, NOT 20k.** Measured: 15 train
-  batches → stop at 7k (flat 6.0–7.6k, floor ~0.115; 20k lands 0.147);
-  31 train batches → stop at 10k (flat 7.5–11k, floor ~0.113; 20k lands
-  0.121). Onset scales sublinearly with corpus (NOT constant
-  passes-per-batch — measured 2026-07-04), so for a new corpus size run
-  full logs once and read the flat region — **with `snapshot_every=500`
-  (knob landed 2026-07-05): keeps params-only `.ep{N}` files next to
-  the checkpoint, so the early-stopped net is a file copy off the
-  calibration run instead of a ~36 min retrain** (the gen-8 Arm A run
-  predated this and owed exactly that retrain). Everything else per
-  Stage 2, plus `model=PolicyValueNetAttn()` and `data_parallel=True`.
-  Training-health check for attn: eval v at the floor ≈ 0.113–0.115
-  (the old 0.13–0.14 band is the *old architecture's* level).
+- **The attn recipe (updated 2026-07-06): full 20k; early stopping is
+  CONTINGENT on the corpus.** Muzero corpora: the 64k gen-8d_mz run
+  showed NO U-curve through 20k (holdout v ≈ 0.074, seen-vs-holdout
+  gap closed) — train full 20k, keep full logs + `snapshot_every=500`
+  as insurance, early-stop only if an upturn appears. The old
+  U-minimum table (15 batches → 7k, 31 → 10k, floors 0.113–0.115)
+  applies to GUMBEL-corpus runs only — the U-curve was the value head
+  memorizing weak-play outcome noise. Weight decay stays SHELVED.
+  Everything else per Stage 2, plus `model=PolicyValueNetAttn()` and
+  `data_parallel=True`. Training-health check on muzero corpora:
+  holdout v ≈ 0.074 band, policy CE ≈ 0.72 band (peaked targets —
+  not comparable to the old 0.9585 gumbel-target floor).
 **Queued work (order decided end-of-session 2026-07-04):**
 
-0. **NEXT (2026-07-06): the gen-8 RETAKE (student gen-8d_mz_es,
-   corpus anchor SRC="7b_es_mz") = the muzero-teacher crank — the
-   operator is RE-OPENED.** `search_variant="muzero"` (classical
+0. **DONE (2026-07-06): the gen-8 RETAKE — gen-8d_mz PROMOTED
+   (+13.7/+11.0 raw, both seeds ***; trained full 20k, NO U-curve,
+   no `_es` needed). NEXT: gen-9, same recipe, SRC=8d_mz.** The
+   muzero collection config is now the STANDING recipe (see Stage 1
+   note below); re-probe the operator (muzero K=16×64 vs new raw)
+   while the gen-9 corpus collects. Original arc: `search_variant="muzero"` (classical
    PUCT via `mctx.muzero_policy`, landed `sxznyotm`) beats gen-7 raw
    **+11.8*** at K=45×64** where Gumbel read −1.1 ns — same budget,
    same net, same deals; pb_c plateau 0.64–2.5. Pre-collection probe

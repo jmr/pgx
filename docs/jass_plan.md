@@ -9,7 +9,22 @@ markers as work completes. **Dated experiment results and diagnostics live in
 `docs/jass_experiment_log.md`** (append new results there; this file keeps
 conclusions and pointers). The per-generation procedure is `docs/jass_sop.md`.
 
-## Status snapshot (2026-07-05)
+## Status snapshot (2026-07-06)
+
+**CHAMPION: gen-8d_mz (`pv_gen8d_mz.msgpack`) — PROMOTED 2026-07-06,
+raw +13.7/+11.0 vs gen-7, both seeds p<0.0001.** The muzero-teacher
+retake of gen-8: same net, same 32×2048 corpus size, ONE change vs
+the two washed attempts — the collection searcher
+(`search_variant="muzero"`, K=16×64, pb_c=1.25). Trained the full
+20k with NO U-curve (first attn run that doesn't overfit; holdout v
+0.074 vs the old 0.111–0.113 floors), so no `_es` suffix. The
+operator, the training curve, and the gate all confirm the same
+mechanism: the Gumbel-visits teacher was the binding constraint —
+see the 2026-07-06 log arc. NEXT: gen-9 on the same recipe with
+gen-8d_mz as generator; JTR re-calibration owed (can raw now match
+POWERFUL?); dose-response carries the corpus-size decision.
+
+## Previous snapshot (2026-07-05)
 
 **EXTERNAL MILESTONE (2026-07-05): the gap to JTR's classical POWERFUL
 has closed to ZERO.** gen-6b_es and gen-7, exported through the new

@@ -1735,3 +1735,39 @@ teacher), standard recipe, full 20k:
 (`7b_es`), two seeds, 300 pairs, fingerprints first.** Teacher margin
 was +10.5; the loss table says the net absorbed the sharper targets —
 the gate says whether it converts.
+
+## 2026-07-06 — gen-8d_mz raw gate vs gen-7: +13.7/+11.0 BOTH SEEDS *** — PROMOTED; the muzero-teacher crank converts at ~1:1
+
+Stage 3 raw gate (temp 0.05, 300 pairs/seed, fingerprints distinct:
+new=29546.98 / src=28867.91; baseline label printed the SRC corpus
+token "7b_es_mz" but the loaded net is the gen-7 champion):
+
+- **Seed 0: mean +13.7, t=+7.833, p<0.0001, sign 203W/79L***.**
+- **Seed 2: mean +11.0, t=+6.493, p<0.0001, sign 189W/96L***.**
+- **Verdict: PROMOTED. gen-8d_mz is CHAMPION** and the next-round
+  generator. First promotion since gen-7 (2026-07-04), third attempt
+  at gen-8, and the single change vs the two washed attempts was the
+  teacher searcher.
+
+Conversion: teacher margin +10.5 (muzero K=16×64 over gen-7 raw) →
+student raw +11.0/+13.7 over the same opponent. The student fully
+absorbed its teacher's edge — same 1:1-or-better band as gen-4
+(+11.1 fuel → +15 gate). Together with the no-U-curve train and the
+0.074 value floor, every stage of the round says the same thing: the
+Gumbel-visits teacher was the binding constraint on the whole loop.
+
+**The crank is TURNING again. Queue for the next rounds:**
+1. **gen-9 (SRC=8d_mz): same recipe, new generator** — muzero
+   K=16×64, 32×2048, full 20k (ES only if a U-curve reappears —
+   watch the full logs). The standing question each round: does the
+   operator margin (muzero vs new raw) persist at the new champion?
+   Probe it while the corpus collects, per the old cadence.
+2. **JTR re-calibration is OWED** — export gen-8d_mz. The headline
+   external question: gen-7 raw lost to POWERFUL by −7.5/−8.5 and
+   gen-8d_mz raw is ~+12 over gen-7 raw internally — raw may now
+   MATCH the classical baseline with no search at all (and PUCT
+   should clear it).
+3. **Dose-response** (15-batch student on this corpus) — the
+   corpus-size DECISION for the muzero recipe.
+4. Parked: C′ gumbel-native-readout efficiency probe; B capacity
+   scaling.

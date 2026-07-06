@@ -1599,3 +1599,56 @@ too, v_scale=100) and re-run the 2026-07-06 K=45×64 probe unchanged.
 - Still ≈ 0 → the +10 lives in the trump-phase heuristic playouts or
   the harness; next discriminator is a JTR arena arm with trump forced
   to the policy head on both sides.
+
+## 2026-07-06 — A′ probe: classical PUCT (`muzero_policy`) beats gen-7 raw +11.8*** at the JTR budget — THE OPERATOR IS RE-OPENED; the bottleneck was the GUMBEL SEARCHER all along
+
+Same budget (K=45×64 ≈ 2,880 expansions/move), same net (gen-7
+champion), same deals (same seeds) as the 2026-07-06 Gumbel probe —
+only the searcher swapped (`search_variant="muzero"`,
+`dirichlet_fraction=0`; knob landed `sxznyotm`). 320 pairs/arm,
+~2.5 min/arm on the 2×4:
+
+| arm (pb_c_init) | mean/game | t | p | sign (pairs) |
+|:--|:--|:--|:--|:--|
+| 0.64 (JTR-equiv) | **+11.8** | +7.41 | <0.0001 *** | 204W/98L *** |
+| 1.25 (AZ default) | +11.5 | +7.05 | <0.0001 *** | 210W/97L *** |
+| 2.5 (high-expl) | +11.1 | +6.69 | <0.0001 *** | 205W/97L *** |
+
+- **Reproduces JTR's external margin (+10.15) internally with
+  NET-ONLY signals.** The trump-phase heuristic-playout channel is
+  NOT needed to explain the external result.
+- **pb_c is a plateau across 0.64–2.5** — no tuning cliff; the mctx
+  default (1.25) is fine.
+- **Direct searcher A/B at identical budget: Gumbel −1.1 ns vs
+  classical PUCT +11.8***.** The searcher choice alone is worth ~13
+  points of operator margin on this net.
+- **REINTERPRETATION cascade — every "operator" number in this log
+  was measured through Gumbel:** the fuel trendline (+26 → +11 → +3
+  → −6.3), the sharpening probe ("no search axis re-opens"), the
+  gauge-ZERO retirement, the internal deploy-raw finding (−6.3), and
+  the gen-8 fixed point. All of it now reads as "the net outgrew
+  SMALL-SIM GUMBEL-AS-READ-OUT-BY-SUMMED-VISITS", not "search (or
+  self-play) is exhausted". The gen-8 wash follows by construction:
+  its corpus targets were Gumbel visit counts ≈ the raw policy.
+- Working note on WHY: Gumbel sequential halving spreads root visits
+  across the considered set in phases, so a summed-visit readout is
+  flat/noisy at 64 sims/det — and Gumbel's actual recommendation is
+  completed-Q-based, which our visit-argmax aggregation never reads.
+  Classical PUCT concentrates visits on its preferred action: summed
+  visits ARE its native signal (and JTR's aggregation).
+
+**DECISION (2026-07-06): gen-9 = the muzero-teacher crank.**
+- **Pre-collection probe first (cheap):** muzero at the STANDING
+  collection config K=8×128 (1,024 exp/move) vs gen-7 raw. Margin
+  holds → Stage 1 cost unchanged (~1.4 h at 64k). Collapses → pay
+  for K=45×64 (~2.8×) or find the knee (K=16×64, K=45×16, …).
+- Collection call: `make_puct_collect_fn(..., search_variant=
+  "muzero", pb_c_init=1.25)`; keep `dirichlet_fraction=0` (τ=1.0
+  visit sampling already provides self-play diversity; noise-free
+  targets match the probed teacher) and τ=1.0 per the standing
+  recipe.
+- **The 15-batch dose-response arm goes LIVE again** (stronger
+  targets may need fewer games — it carries the corpus-size DECISION
+  for the new recipe).
+- The raw gate stays the progress gate; external deployment stays
+  JTR-PUCT (unchanged).

@@ -189,16 +189,18 @@ need TWO model instances.
   (the old 0.13–0.14 band is the *old architecture's* level).
 **Queued work (order decided end-of-session 2026-07-04):**
 
-0. **NEXT (2026-07-06): gen-9 direction — probe DONE, Option A
-   CLOSED.** No mctx config beats gen-7 raw (JTR-mirror K=45×64:
-   −1.1 ns; depth control K=8×360: −9.8***), yet JTR's searcher gets
-   +10.15 from the same net at the same budget. A′ SCOPED by code
-   reading (log 2026-07-06): JTR uses the pgx value head at leaves
-   (no rollouts in card play) through classical full-width PUCT —
-   next action is the `mctx.muzero_policy` swap in `jass_puct.py` +
-   re-run of the K=45×64 probe. B (capacity on the existing corpus)
-   is the parallel internal lever. Full option table: log 2026-07-06
-   entries + plan NEXT block.
+0. **NEXT (2026-07-06): gen-9 = the muzero-teacher crank — the
+   operator is RE-OPENED.** `search_variant="muzero"` (classical
+   PUCT via `mctx.muzero_policy`, landed `sxznyotm`) beats gen-7 raw
+   **+11.8*** at K=45×64** where Gumbel read −1.1 ns — same budget,
+   same net, same deals; pb_c plateau 0.64–2.5. First action: the
+   pre-collection probe (muzero at the standing K=8×128 collection
+   config vs raw — decides whether Stage 1 cost changes at all),
+   then collect with `search_variant="muzero", pb_c_init=1.25,
+   dirichlet_fraction=0`, τ=1.0. Dose-response is LIVE again. Full
+   arc: log 2026-07-06 entries + plan NEXT block. ⚠ The Gumbel
+   default is UNCHANGED in code — collection cells must pass
+   `search_variant="muzero"` explicitly.
 1. **DONE 2026-07-05: JTR arena chapter.** Export + PUCT calibration
    (gap to POWERFUL = ZERO) + raw arena (`--pgx-raw`, JTR change
    `qzzrmuqy`): externally PUCT > raw +10.15 and raw < POWERFUL

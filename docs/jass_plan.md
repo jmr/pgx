@@ -69,38 +69,38 @@ gated WASH vs gen-7. **A same-size self-distillation round is a FIXED
 POINT at gen-7**; weight decay is shelved and early stopping stays
 the recipe until something re-opens the climb.
 
-**The direction probe RESOLVED (2026-07-06, log entry): Option A —
-re-open the operator with mctx budget/worlds — is CLOSED by
-measurement.** gen-7 PUCT at the JTR-mirror config (K=45×64, 2,880
-expansions/move) reads −1.1 ns vs its own raw; K is a noise knob
-(−9.8 @K=8 → −3.4 @K=16 → −1.1 @K=45, converging to zero from
-below) and depth at fixed budget actively hurts (K=8×360: −9.8***).
-Yet JTR's searcher extracts **+10.15** from the same net at the same
-budget — a stronger-than-raw teacher EXISTS, in JTR's search
-mechanics or harness, not in mctx sims/worlds. Live candidates:
+**RESOLVED (2026-07-06, log entries): THE OPERATOR IS RE-OPENED —
+the bottleneck was the GUMBEL SEARCHER.** The probe arc, all on
+gen-7, all at the JTR budget (K=45×64 ≈ 2,880 expansions/move):
+Gumbel reads **−1.1 ns** (K is a noise knob, depth at fixed budget
+actively hurts: K=8×360 −9.8***); JTR's classical PUCT extracts
+**+10.15** externally from the same net; reading JTR's code showed
+its card-play leaf evals are the pgx VALUE HEAD (not rollouts); and
+swapping the internal searcher to `mctx.muzero_policy`
+(`search_variant="muzero"`, landed `sxznyotm`) reproduces the margin
+internally: **+11.8*** vs raw (pb_c plateau 0.64–2.5)**. Net-only
+signals — the trump-phase heuristic channel isn't needed. Every
+historic "operator exhausted" number (fuel trendline +26→−6.3,
+sharpening probe, gauge-ZERO, the gen-8 fixed point) was measured
+through Gumbel-read-by-summed-visits and is REINTERPRETED as "the
+net outgrew small-sim Gumbel", not "self-play is exhausted".
 
-- **A′. Import the JTR searcher delta — SCOPED (2026-07-06, log):**
-  JTR's card-play leaf evals are the pgx VALUE HEAD (not rollouts),
-  so the +10 comes from net-only signals through CLASSICAL FULL-WIDTH
-  PUCT (points-scale Q, puctC=100, no Gumbel halving) — except trump
-  selection, which searches with JTR's rule-based heuristic playouts.
-  Next: swap `mctx.gumbel_muzero_policy` → `mctx.muzero_policy`
-  (`dirichlet_fraction=0`) in `jass_puct.py`, re-run the K=45×64
-  probe. Wins → gen-9 collects with muzero_policy targets. Still ~0 →
-  the +10 is the trump-phase heuristic (JTR-knowledge caveat) or
-  harness. The only lever with a measured +10 behind it.
-- **B. Net capacity scaling** — bigger attn on the existing 64k gen-7
-  corpus; zero collection cost, gen-6b precedent, but fixed-point
-  targets may cap it.
-- **C. Gumbel target knobs** — train on completed-Q `action_weights`
-  instead of summed visits; expectations capped by the probe.
+**gen-9 = the muzero-teacher crank (DECISION 2026-07-06, log):**
 
-Ruled out: mctx budget/worlds (the probe), more same-recipe fuel,
-more regularization, JTR games as targets (standing DECISION),
-Step-5 imperfect-info. The raw-vs-PUCT corpus A/B and the
-dose-response corpus-size decision stay DEFERRED — dose-response goes
-live again the moment any stronger teacher lands (fewer,
-better-labeled games is the cheap collection mode).
+1. **Pre-collection probe:** muzero at the STANDING collection config
+   K=8×128 vs gen-7 raw. Margin holds → Stage 1 cost unchanged;
+   collapses → find the cheapest config that keeps it (K=16×64, …,
+   up to K=45×64 at ~2.8×).
+2. **Collect** with `make_puct_collect_fn(..., search_variant=
+   "muzero", pb_c_init=1.25)`, `dirichlet_fraction=0`, τ=1.0,
+   standard 32×2048. Train (ES per recipe), gate raw-vs-raw vs gen-7.
+3. **Dose-response goes LIVE** (stronger targets may need fewer
+   games; it carries the corpus-size DECISION for the new recipe).
+
+Parked: B (capacity scaling — revisit if the muzero crank stalls),
+C (Gumbel target knobs — moot while muzero is the teacher). Ruled
+out: mctx-Gumbel budget/worlds, more regularization, JTR games as
+targets (standing DECISION), Step-5 imperfect-info.
 
 ## Previous snapshot (2026-07-03)
 

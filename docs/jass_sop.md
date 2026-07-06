@@ -8,15 +8,23 @@ procedure changes (e.g. the gate change of 2026-06-21).
 
 ## The single anchor (do this first, every cell)
 
-Derive **every** path from one integer so you can't load a stale generation:
+Derive **every** path from the anchor tokens so you can't load a stale
+generation. **Since 2026-07-06 the anchors are STRINGS, three tokens**
+(attempt letters and recipe tags accrete — generations aren't abandoned
+on failed attempts):
 
 ```python
-GEN = 5            # the generation you PRODUCE this run (bump this, nothing else)
-SRC = GEN - 1      # champion: generator, corpus name, gate opponent
+CHAMP = "7b_es"          # champion label — the params file you LOAD
+SRC   = CHAMP + "_mz"    # corpus namespace: champion + teacher-recipe tag
+GEN   = "8d_mz"          # the student this run PRODUCES
 ```
 
-Then all filenames are f-strings: `pv_gen{SRC}_s128.msgpack` (champion),
-`corpus_puct_gen{SRC}_16x2048_s128k8.pickle` (named by its *generator*). The
+⚠ Never build the champion-load path from `SRC` — the recipe tag makes
+it a nonexistent file; and label gate baselines with `CHAMP`, not
+`SRC`/`GEN` (a GEN-for-CHAMP print mixup mislabeled the 2026-07-06
+gate output). Then all filenames are f-strings: `pv_gen{CHAMP}…`
+(champion), `corpus_puct_gen{SRC}…` (corpus, named by generator +
+recipe), `pv_gen{GEN}…` (student). The
 new generation has **two distinct files — don't confuse them**:
 `pv_gen{GEN}_s128_ckpt.msgpack` is the resumable **training checkpoint**
 (`checkpoint_path=`, written every 500 epochs), and `pv_gen{GEN}_s128.msgpack`

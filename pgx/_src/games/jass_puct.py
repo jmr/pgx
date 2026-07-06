@@ -7,7 +7,10 @@ JTR-style operator; A′ probe 2026-07-06) — with the PolicyValueNet
 supplying priors and leaf values, and the real game engine (`Game.step`)
 as the dynamics. The K trees are aggregated by SUMMING ROOT
 VISIT COUNTS and acting on the summed counts — the load-bearing choice from
-docs/jass_plan.md (Q-sum aggregation neutralizes the tree policy).
+docs/jass_plan.md (Q-sum aggregation neutralizes the tree policy). That
+holds for NET-PRIOR search only: under flat priors visits stay ~uniform
+and the visit readout picks near-noise, so `readout="qsum"` provides the
+JTR-style score-sum Σ_k N_k(a)·Q_k(a) instead (2026-07-06 probe log).
 
 Grounded-teacher knobs (2026-07-06, the gen-9 fixed-point escape —
 see the plan's NEXT block): `prior_mix_uniform` mixes the net's priors
@@ -181,8 +184,9 @@ def puct_search(
     dirichlet_fraction: float = 0.0,
     prior_mix_uniform: float = 0.0,
     rollout_value_weight: float = 0.0,
+    readout: str = "visits",
 ) -> tuple[Array, Array]:
-    """Run K determinized tree searches and sum root visit counts.
+    """Run K determinized tree searches and aggregate the K roots.
 
     Args:
         state: Current (true or self-play) game state.
@@ -214,12 +218,23 @@ def puct_search(
             Breaks the value half of the self-confirmation. Costs up to
             38 extra env steps per node expansion. Both knobs must be
             Python floats at trace time (0.0 compiles to a no-op).
+        readout: How the K root results become one score vector.
+            "visits" (default): SUM ROOT VISIT COUNTS — correct when the
+            priors concentrate visits (the net-prior search). "qsum":
+            JTR-style score-sum, Σ_k N_k(a)·Q_k(a) over the K trees —
+            correct for flat-prior search, where visits stay ~uniform
+            and the visit readout picks near-noise (measured: classical
+            λ=1/w=1 read by visits = −24.3 vs gen-9 raw, 2026-07-06).
 
     Returns:
-        (visit_counts, legal): (43,) float32 root visit counts summed over
-        the K trees (zero on illegal actions), and the (43,) bool legal
-        mask of the information state.
+        (scores, legal): (43,) float32 aggregated root scores and the
+        (43,) bool legal mask of the information state. readout="visits":
+        summed visit counts, zero on illegal actions. readout="qsum":
+        visit-weighted Q mass in points, −inf on actions that are
+        illegal or unvisited in every tree (argmax-safe as-is).
     """
+    if readout not in ("visits", "qsum"):
+        raise ValueError(f"unknown readout: {readout!r}")
     K = num_determinizations
     det_key, search_key, root_key = jax.random.split(key, 3)
     det_states = jax.vmap(
@@ -265,15 +280,22 @@ def puct_search(
     else:
         raise ValueError(f"unknown search_variant: {search_variant!r}")
 
-    visits = out.search_tree.summary().visit_counts      # (K, 43)
-    visits = jnp.where(legal, visits.sum(axis=0), 0.0)   # (43,)
-    return visits, legal
+    summary = out.search_tree.summary()
+    visits = summary.visit_counts                        # (K, 43)
+    if readout == "visits":
+        scores = jnp.where(legal, visits.sum(axis=0), 0.0)
+    else:  # "qsum" — qvalues are root-mover perspective in all K trees;
+        # unvisited children hold Q=0, so N·Q weighting ignores them.
+        qmass = (visits * summary.qvalues).sum(axis=0)   # (43,)
+        scores = jnp.where(
+            legal & (visits.sum(axis=0) > 0), qmass, -jnp.inf)
+    return scores, legal
 
 
 @functools.partial(jax.jit, static_argnames=(
     "pv_apply", "num_determinizations", "num_simulations",
     "max_num_considered_actions", "search_variant",
-    "prior_mix_uniform", "rollout_value_weight"))
+    "prior_mix_uniform", "rollout_value_weight", "readout"))
 def puct_action(
     state: GameState,
     player_id: Array,
@@ -289,14 +311,16 @@ def puct_action(
     dirichlet_fraction: float = 0.0,
     prior_mix_uniform: float = 0.0,
     rollout_value_weight: float = 0.0,
+    readout: str = "visits",
 ) -> Array:
-    """Greedy PUCT move: argmax of summed root visits (ties → first legal)."""
-    visits, legal = puct_search(
+    """Greedy PUCT move: argmax of the aggregated root scores."""
+    scores, legal = puct_search(
         state, player_id, key, pv_params, pv_apply,
         num_determinizations, num_simulations, v_scale,
         max_num_considered_actions, search_variant, pb_c_init,
-        dirichlet_fraction, prior_mix_uniform, rollout_value_weight)
-    scored = jnp.where(legal, visits, -jnp.inf)
+        dirichlet_fraction, prior_mix_uniform, rollout_value_weight,
+        readout)
+    scored = jnp.where(legal, scores, -jnp.inf)
     return jnp.argmax(scored).astype(jnp.int32)
 
 
@@ -313,30 +337,48 @@ def make_puct_policy_fn(
     dirichlet_fraction: float = 0.0,
     prior_mix_uniform: float = 0.0,
     rollout_value_weight: float = 0.0,
+    readout: str = "visits",
     temperature: float = None,
 ):
     """Build a policy_fn(state, key) → (action, pi) for jass_selfplay.
 
-    pi is the normalized summed visit distribution — the Step 3 policy
-    training target. The executed action is the visit argmax when
-    temperature is None, otherwise sampled ∝ visits^(1/temperature)
-    (AlphaZero-style exploration; temperature=1 samples the visit
-    distribution itself).
+    readout="visits" (default): pi is the normalized summed visit
+    distribution — the Step 3 policy training target. The executed
+    action is the visit argmax when temperature is None, otherwise
+    sampled ∝ visits^(1/temperature) (AlphaZero-style exploration;
+    temperature=1 samples the visit distribution itself).
+
+    readout="qsum": greedy argmax of the JTR-style Q mass; pi is the
+    one-hot of that action (the classical teacher's recommendation —
+    visit counts carry no policy signal under flat priors). temperature
+    is visit-count semantics and would be silently meaningless here, so
+    it must be None; use dirichlet_fraction for exploration instead.
     """
+    if readout == "qsum" and temperature is not None:
+        raise ValueError(
+            "readout='qsum' requires temperature=None (greedy); "
+            "temperature samples visit counts, which carry no policy "
+            "signal under a Q readout — use dirichlet_fraction for "
+            "exploration instead")
 
     def policy_fn(state: GameState, key: Array):
         k_search, k_sample = jax.random.split(key)
-        visits, legal = puct_search(
+        scores, legal = puct_search(
             state, state.current_player, k_search, pv_params, pv_apply,
             num_determinizations, num_simulations, v_scale,
             max_num_considered_actions, search_variant, pb_c_init,
-            dirichlet_fraction, prior_mix_uniform, rollout_value_weight)
-        pi = visits / visits.sum().clip(1.0)
-        if temperature is None:
-            action = jnp.argmax(jnp.where(legal, visits, -jnp.inf))
+            dirichlet_fraction, prior_mix_uniform, rollout_value_weight,
+            readout)
+        if readout == "qsum":
+            action = jnp.argmax(scores)          # already −inf masked
+            pi = jax.nn.one_hot(action, NUM_ACTIONS)
+        elif temperature is None:
+            pi = scores / scores.sum().clip(1.0)
+            action = jnp.argmax(jnp.where(legal, scores, -jnp.inf))
         else:
+            pi = scores / scores.sum().clip(1.0)
             logits = jnp.where(
-                legal, jnp.log(visits.clip(1e-9)) / temperature, _ILLEGAL)
+                legal, jnp.log(scores.clip(1e-9)) / temperature, _ILLEGAL)
             action = jax.random.categorical(k_sample, logits)
         return action.astype(jnp.int32), pi
 
@@ -367,9 +409,13 @@ def make_puct_collect_fn(
     dirichlet_fraction: float = 0.0,
     prior_mix_uniform: float = 0.0,
     rollout_value_weight: float = 0.0,
+    readout: str = "visits",
     temperature: float = 1.0,
 ):
     """Build a collect_fn(key, batch_size) generating PUCT self-play data.
+
+    readout="qsum" requires an explicit temperature=None (greedy) —
+    pair it with dirichlet_fraction for corpus diversity.
 
     The Step 3 generator: every seat plays PUCT; policy targets are the
     aggregated root visit distributions; value labels are the acting
@@ -392,6 +438,7 @@ def make_puct_collect_fn(
             dirichlet_fraction=dirichlet_fraction,
             prior_mix_uniform=prior_mix_uniform,
             rollout_value_weight=rollout_value_weight,
+            readout=readout,
             temperature=temperature)
         return _collect_pv(policy_fn, key, batch_size)
 

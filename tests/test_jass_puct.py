@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+import pytest
 
 from pgx._src.games.jass import DECLARE_OFFSET, Game, MODE_SCORES
 from pgx._src.games.jass_puct import (
@@ -7,6 +8,7 @@ from pgx._src.games.jass_puct import (
     _rollout_value,
     make_puct_action_fn,
     make_puct_collect_fn,
+    make_puct_policy_fn,
     puct_action,
 )
 from pgx._src.games.jass_selfplay import policy_match, random_action_fn
@@ -164,6 +166,46 @@ def test_puct_action_grounded_knobs_legal():
                          search_variant="muzero",
                          prior_mix_uniform=1.0, rollout_value_weight=1.0)
     assert bool(game.legal_action_mask(state)[action])
+
+
+def test_qsum_readout_action_legal_and_one_hot_pi():
+    pv_apply, params = _pv()
+    state = game.init(jax.random.PRNGKey(0))
+    state = game.step(state, jnp.int32(DECLARE_OFFSET))
+    policy_fn = make_puct_policy_fn(
+        pv_apply, params,
+        num_determinizations=2, num_simulations=8,
+        search_variant="muzero", readout="qsum")
+    action, pi = jax.jit(policy_fn)(state, jax.random.PRNGKey(1))
+    legal = game.legal_action_mask(state)
+    assert bool(legal[action])
+    assert float(pi.sum()) == 1.0 and float(pi[action]) == 1.0
+
+
+def test_qsum_readout_rejects_temperature():
+    pv_apply, params = _pv()
+    with pytest.raises(ValueError, match="qsum"):
+        make_puct_policy_fn(pv_apply, params,
+                            readout="qsum", temperature=1.0)
+
+
+def test_classical_qsum_sign_conventions_beat_random():
+    """Net-free classical search read by Q-sum must clearly beat random.
+
+    The load-bearing semantic check for the qsum readout: qvalues are
+    aggregated in the root mover's perspective across the K trees, so a
+    perspective or masking error would pick point-minimizing moves.
+    Random-init net params: flat priors + rollout values use no net.
+    """
+    pv_apply, params = _pv()
+    fn = make_puct_action_fn(pv_apply, params,
+                             num_determinizations=2, num_simulations=16,
+                             search_variant="muzero",
+                             prior_mix_uniform=1.0, rollout_value_weight=1.0,
+                             readout="qsum")
+    scores = policy_match(fn, random_action_fn, jax.random.PRNGKey(0), 8)
+    mean = float(scores.mean())
+    assert mean > 5.0, f"classical qsum vs random {mean:+.1f}; sign error likely"
 
 
 def test_puct_sign_conventions_beat_random():

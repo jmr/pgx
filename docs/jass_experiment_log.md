@@ -1992,3 +1992,32 @@ harness vs POWERFUL before building anything else:**
   above-parity teachers (budget + capacity scaling) or stronger
   external engines (JTR++, KUS) as calibration targets — reframe the
   plan, and B-capacity moves back up on its own merits.
+
+## 2026-07-06 — qsum probe first read: classical 16×64 = −61 vs gen-9 raw — a READOUT SIGN BUG, not a measurement (score-sum inverts when Q<0); fixed to visit-weighted mean Q
+
+First run of the qsum classical arms: 16×64 read **−61** mean/game vs
+gen-9 raw — *worse* than the −24.3 visits readout — and the 45×64 arm
+crashed the runtime before completing (likely the working set: 8
+pairs/chip × K=45 plus the rollout state is far past the profiled
+B×K≈64 knee).
+
+−61 was the bug's signature, not the search's strength. The first
+qsum implementation copied JTR's aggregation literally: score-sum
+Σ_k N_k(a)·Q_k(a). But JTR sums per-leaf *scores*, which are
+non-negative (0..157); our Q is a **±157 points differential**. With
+mixed-sign Q the sum inverts preferences in every from-behind
+position: a lightly-visited terrible action (−40×2 = −80) outscores a
+heavily-visited slightly-losing one (−1×40 = −40). Against random
+(all positions winning, Q>0 throughout) the readout looked great
+(+30.4 with a random-init net vs +10.8 by visits) — against the
+stronger gen-9 raw, the classical side is behind half the time and
+systematically picked its least-examined move from every losing
+position. Textbook eval-asymmetry trap: validated on wins only.
+
+**Fix (same day): `readout="qsum"` = visit-weighted MEAN Q across the
+K trees** — sign-safe, and slightly better even vs random (+32.2).
+Negative-Q regression unit added (`_qsum_scores`); 14 puct tests
+pass. The −61 number is VOID; both qsum arms rerun with the fix:
+- 16×64 as before;
+- 45×64 with **PAIRS_PER_CHIP=4, ROUNDS=10** (same 320 pairs, half
+  the per-chip working set) to stay under the memory knee.

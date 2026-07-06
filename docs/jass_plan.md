@@ -32,14 +32,37 @@ The escape is a stronger TEACHER than self-play can generate.
 POWERFUL beating our raw ~7.5 at equal compute is the existence proof
 that such a teacher exists — but it is **OFF-LIMITS as a teacher: NO
 JTR games in the training mix (standing DECISION 2026-07-05,
-Step 4b)**; JTR is the preserved external benchmark. **NEXT (strongest
-first): (1) a stronger IN-HOUSE search operator** — (a) decouple the
-teacher from the net's priors (flattened/uniform priors, stronger root
-exploration); cheap operator probe vs gen-9 raw first — a reopened
-margin = the gen-10 teacher; (b) port algorithmic differences from
-JTR's classical PUCT into `jass_puct.py` (its code/ideas are fair
-game; its games are not). **(2) B capacity scaling only PAIRED with
-(1).** JTR re-calibration owed regardless.
+Step 4b)**; JTR is the preserved external benchmark, and the goal is
+strong *general* Jass, not a JTR-exploiter.
+
+**NEXT (2026-07-06): gen-10 GROUNDED-TEACHER PROBES — all in-house.**
+Mechanism of the fixed point: the loop is fully closed — the net's
+logits are the priors at every tree node, the net's value head is the
+only leaf evaluator, and collection ran `dirichlet_fraction=0`.
+Nothing external ever enters, so search(π) → π. POWERFUL's edge is
+grounding (rollout evaluations = real game outcomes), not anything
+JTR-specific. Three probe arms on the standing operator-probe harness
+(320 pairs, greedy teacher vs gen-9 raw τ=0.05, muzero K=16×64,
+pb_c=1.25):
+1. **Root noise:** `dirichlet_fraction=0.25` (knob existed, never on).
+   Unlikely to move the greedy probe alone, but goes into gen-10
+   collection regardless (missing AlphaZero ingredient).
+2. **Flat priors:** `prior_mix_uniform=λ` (new knob) — mix priors
+   toward uniform-over-legal at root and tree nodes; λ=1 = uniform-
+   prior PUCT. Safe per JTR's own experiment (uniform-prior PUCT tied
+   its classical baseline). Breaks the prior half of self-confirmation.
+3. **Rollout leaf value:** `rollout_value_weight=w` (new knob) — blend
+   the value head toward a uniform-random playout to terminal, real
+   points; w=1 = classical evaluation. Breaks the value half. Arms
+   2+3 combined = in-house classical ISMCTS, the POWERFUL-equivalent
+   with zero JTR content.
+Go/no-go: any arm reopening a significant margin vs gen-9 raw is the
+gen-10 teacher → collect with it (+ root noise), gate raw-vs-raw vs
+gen-9; JTR re-calibration stays the held-out generalization check.
+All flat → the operator class is the cap: port JTR PUCT algorithmic
+diffs (code/ideas fair game, games not), and B-capacity only PAIRED
+with whatever stronger teacher emerges. JTR re-calibration owed
+regardless.
 
 ## Previous snapshot (2026-07-06 — gen-8d_mz)
 

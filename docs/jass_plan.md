@@ -21,16 +21,25 @@ policy CE 0.604). **But the step collapsed ~4–5× vs gen-8d_mz's
 the one-time teacher-swap unlock and iterating the fixed recipe yields
 a thin gen-over-gen gain.
 
-**SATURATION CONFIRMED (2026-07-06): the operator probe reads muzero
-K=16×64 vs gen-9 raw = −1.0 ns** — the teacher that led gen-7 raw by
-+10.5 can no longer beat gen-9's raw at all. The student caught up to
-its teacher; a gen-10 on the identical recipe would gate flat.
-**NEXT: sweep the teacher budget UP (muzero K=32×64 / K=45×64 vs
-gen-9 raw) — cheap, no training.** Margin reopens → gen-10 cranks the
-teacher harder; still flat at K=45×64 → search isn't the constraint,
-pull the **B capacity lever** (hidden=128 → larger net). JTR
-re-calibration still owed (two promotions banked; can raw match
-POWERFUL?); dose-response owed.
+**SATURATION CONFIRMED (2026-07-06): muzero search is FLAT vs gen-9
+raw at every budget — K=16/32/45×64 = −1.0/−1.6/−0.1 ns.** The
+teacher that led gen-7 raw by +10.5 can no longer beat gen-9's raw
+even at 2,880 exp/move (POWERFUL's budget). The determinization-PUCT
+improvement operator has saturated: search(π) ≈ π, a policy-iteration
+fixed point. **The net fully captures its own search, so pure B-capacity
+scaling on the current corpus is a WASH** (training was already clean).
+The escape is a stronger TEACHER than self-play can generate.
+POWERFUL beating our raw ~7.5 at equal compute is the existence proof
+that such a teacher exists — but it is **OFF-LIMITS as a teacher: NO
+JTR games in the training mix (standing DECISION 2026-07-05,
+Step 4b)**; JTR is the preserved external benchmark. **NEXT (strongest
+first): (1) a stronger IN-HOUSE search operator** — (a) decouple the
+teacher from the net's priors (flattened/uniform priors, stronger root
+exploration); cheap operator probe vs gen-9 raw first — a reopened
+margin = the gen-10 teacher; (b) port algorithmic differences from
+JTR's classical PUCT into `jass_puct.py` (its code/ideas are fair
+game; its games are not). **(2) B capacity scaling only PAIRED with
+(1).** JTR re-calibration owed regardless.
 
 ## Previous snapshot (2026-07-06 — gen-8d_mz)
 

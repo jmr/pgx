@@ -1880,3 +1880,58 @@ diagnostic decides between them BEFORE any collection/training:**
     CAPACITY is. Pull the **B capacity lever** (hidden=128 → larger
     `PolicyValueNetAttn`) — the parked item, now the live path.
 - JTR re-calibration stays owed regardless (two promotions banked).
+
+## 2026-07-06 — Teacher-budget sweep: muzero flat vs gen-9 raw at EVERY budget (K=16/32/45×64 = −1.0/−1.6/−0.1) — search SATURATED, not starved
+
+Extends the operator probe up the worlds axis, same setup (muzero
+pb_c=1.25, sims=64, greedy teacher vs raw temp 0.05, gen-9 both,
+fp 693.58, 320 pairs/arm):
+
+| K×64 | exp/move | mean/game | t | sign (pairs) |
+|:--|:--|:--|:--|:--|
+| 16×64 | 1,024 | −1.0 | −0.765 p=0.4450 ns | 130W/140L ns |
+| 32×64 | 2,048 | −1.6 | −1.346 p=0.1793 ns | 117W/143L ns |
+| 45×64 | 2,880 | −0.1 | −0.112 p=0.9107 ns | 130W/133L ns |
+
+- **Flat everywhere — no reopening with more worlds.** Even at 2,880
+  exp/move (2.8× the collection budget, = JTR/POWERFUL's ~2,880),
+  search cannot beat gen-9's raw. The teacher isn't starved for
+  worlds; the determinization-PUCT improvement operator has SATURATED
+  against this policy. (The depth axis is already ruled out by the
+  three worlds-over-depth probes — more sims/world was
+  worthless-to-harmful even when a +10 margin existed.)
+- **The net fully captures its own search:** search(gen-9) ≈
+  raw(gen-9) means the policy is NOT a lossy compression of better
+  targets — at this budget there ARE no better targets. So a bigger
+  net trained on the same corpus has nothing extra to learn (training
+  was already clean: no overfit, train≈eval, losses plateaued).
+  **Pure B-capacity scaling on the current recipe is therefore likely
+  a WASH — the earlier "flat at K=45 → pull the B lever" inference was
+  too quick.** Capacity only pays if paired with a stronger teacher.
+- **The binding fact is EXTERNAL and points elsewhere:** at the same
+  2,880 exp/move, POWERFUL beats our raw by ~7.5 (2026-07-05, and
+  perfect-info raw too), yet our own net-guided search at that budget
+  adds nothing over raw. Better play EXISTS and is findable by a
+  classical searcher at equal compute — the self-play loop just can't
+  generate it. This is a policy-iteration fixed point: search(π) ≈ π,
+  so iteration stalls regardless of net size.
+
+**DECISION (2026-07-06): the muzero self-distillation crank is at its
+fixed point. The lever is NOT more search and NOT (alone) more net —
+it is a stronger TEACHER than the loop can self-generate. POWERFUL is
+the existence proof, NOT the teacher: NO JTR games in the training mix
+(standing DECISION 2026-07-05, plan Step 4b) — JTR is the preserved
+external benchmark, and distilling from it would convert "ties/beats
+POWERFUL" into eval-on-train. (An earlier version of this entry listed
+POWERFUL-distillation as candidate #1; corrected same day.) Live
+candidates, strongest first:**
+1. **Stronger IN-HOUSE search operator.** (a) Decouple the teacher
+   from the net's priors — flattened/uniform priors, stronger root
+   exploration — so search stops being self-confirming; cheap operator
+   probe vs gen-9 raw first, a reopened margin = the gen-10 teacher.
+   (b) Port algorithmic differences from JTR's classical PUCT into
+   `jass_puct.py` — its code/ideas are fair game, its games are not.
+2. **B capacity scaling — only PAIRED with a stronger teacher** (1);
+   worthless on the already-absorbed current corpus.
+3. Low/parked: pure B-scaling on the current corpus (expected wash;
+   keep only as a cheap null-check if it's ~free to run).

@@ -54,19 +54,25 @@ readout rescues the arm as configured. **But the arm has a live
 pb_c confound:** 1.25 is net-prior-tuned; a 1/9 flat prior shrinks
 PUCT exploration ~9×.
 
-**NEXT (2026-07-07): (1) gen-9 JTR re-calibration — DECISION-CRITICAL
-(owed anyway).** Export gen-9 → JTR real-PUCT harness vs POWERFUL.
-**(2) Last classical probe: pb_c ∈ {5.6, 11.2} (undoes the 1/9 prior
-rescale), 16×64, both readouts.** Still double-digit negative → the
-in-house classical-teacher branch is DEAD at this budget class. On a
-headroom verdict from (1), the remaining in-house levers are
-(a) determinization QUALITY — learned who-has-card sampling trained
-on OUR self-play games (idea class from JTR ideas.md, zero JTR game
-data) — and (b) porting JTR PUCT algorithmic diffs. gen-9 ≈/above
-POWERFUL → the equal-compute existence proof is gone; reframe:
-stronger external calibration targets (JTR++, KUS), B-capacity on
-its own merits. NO JTR games in the training mix in any branch
-(2026-07-05, Step 4b).
+**CLASSICAL-TEACHER BRANCH CLOSED (2026-07-07, log): pb_c rescale
+recovered the arm to −11.2 best (qsum @11.2; the 1.25 runs were
+mis-tuned by the 1/9 flat prior) but that's still double-digit
+negative — no readout or tuning makes in-house classical search a
+teacher at this budget class. Search-operator probing is DONE.**
+
+**NEXT (2026-07-07): gen-9 JTR re-calibration — THE branch point.**
+Export gen-9 → JTR real-PUCT harness vs POWERFUL. Converging
+prediction: our classical at 1,024 exp/move ≈ −11 vs gen-9, POWERFUL
++8.5 vs gen-7-era ≈ −8 vs gen-9 projected — both say gen-9 ≈
+classical-search parity, so expect POWERFUL ≈ 0/negative.
+- **Confirmed (POWERFUL ≈ 0/negative):** Step 4's external goal is
+  effectively MET without training on JTR; reframe to stronger
+  calibration targets (JTR++, KUS) and B-capacity on its own merits.
+- **Refuted (real headroom remains):** the surviving in-house levers
+  are (a) determinization QUALITY — learned who-has-card sampling
+  trained on OUR self-play games (idea class from JTR ideas.md, zero
+  JTR game data) — and (b) porting JTR PUCT algorithmic diffs.
+NO JTR games in the training mix in any branch (2026-07-05, Step 4b).
 
 ## Previous snapshot (2026-07-06 — gen-8d_mz)
 

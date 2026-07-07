@@ -2064,3 +2064,38 @@ verdict are (a) determinization QUALITY (learned who-has-card
 sampling trained on OUR self-play games — idea class from JTR's
 ideas.md, zero JTR game data) and (b) porting JTR PUCT algorithmic
 diffs.**
+
+## 2026-07-07 — pb_c-rescaled classical probe: best arm −11.2 — the exploration fix recovers ~13–30 pts but the branch CLOSES per the pre-registered rule; the numbers now PREDICT the recal
+
+Classical λ=1/w=1 at 16×64, standing harness vs gen-9 raw (means
+only; arm order = the ARMS dict insertion order of the probe cell):
+
+| pb_c | readout | mean/game |
+|:--|:--|:--|
+| 5.6 | visits | −18.7 |
+| 5.6 | qsum (mean-Q) | −14.8 |
+| 11.2 | visits | −18.2 |
+| 11.2 | **qsum (mean-Q)** | **−11.2** |
+
+- **The pb_c confound was real:** rescaling exploration recovered the
+  arm from −24.3 (visits @1.25) / −42.3 (qsum @1.25) to −11.2. And
+  with a properly exploring tree the readouts flip: qsum beats visits
+  at both c values (the tree now earns its Q estimates; mean-Q stops
+  being pure noise-seeking).
+- **Branch CLOSED per the pre-registered bar** ("still double-digit
+  negative → dead"): best arm −11.2. A teacher must clearly *beat*
+  raw; +11 more from budget (16→45 worlds ≈ 3×) is not plausible —
+  that 3× bought the net-prior operator ~0, and the classical slope,
+  while real, is shallow. No more search-operator probes.
+- **Convergent prediction for the recal:** our in-house classical at
+  1,024 exp/move reads ≈ −11 vs gen-9; POWERFUL at 2,880 read +8.5 vs
+  gen-7-era raw, ≈ −8 vs gen-9 if the +16 internal climb transfers.
+  Two independent estimates now say **gen-9 ≈ classical-search parity
+  at these budget classes.** If the recal confirms (POWERFUL ≈ 0 or
+  negative vs gen-9), the gen-9 fixed point isn't a failure — it's
+  *having caught up with classical search*, and Step 4's external
+  goal vs JTR is effectively met without ever training on it.
+
+**DECISION (2026-07-07): search-operator probing is DONE. The gen-9
+JTR re-calibration is the sole next measurement and the branch point
+for the whole plan.**

@@ -2099,3 +2099,49 @@ only; arm order = the ARMS dict insertion order of the probe cell):
 **DECISION (2026-07-07): search-operator probing is DONE. The gen-9
 JTR re-calibration is the sole next measurement and the branch point
 for the whole plan.**
+
+## 2026-07-07 — EXTERNAL MILESTONE: gen-8d_mz and gen-9 cross ABOVE POWERFUL in JTR's harness — Step-4 external goal MET without ever training on JTR
+
+The re-calibration (JTR repo commit `caa33f9`; 250 pairs / 500 games
+each, seed 42, SWEEP_64, real PUCT on every model side, classical
+POWERFUL as the external opponent):
+
+| matchup | per-game | p | verdict |
+|:--|:--|:--|:--|
+| gen-8d_mz vs gen-7b_es | −0.05 | 0.9549 | wash |
+| gen-9 vs gen-8d_mz | +4.45 | 0.0007 | gen-9 stronger |
+| gen-8d_mz vs POWERFUL | **+4.2** | 0.0028 | ABOVE |
+| gen-9 vs POWERFUL | **+5.05** | 0.0003 | ABOVE |
+
+- **The trendline completes: −22 (gen-3) → −9.5 (gen-5b) → ≈0
+  (gen-6b_es/7b_es) → +4..+5 (gen-8d_mz/gen-9).** The lineage caught
+  classical POWERFUL at gen-6/7 and has now pulled clearly ahead —
+  with ZERO JTR games in training. The generality bet (Step 4b
+  DECISION 2026-07-05) PAID.
+- Our parity prediction was right in direction, conservative in
+  level: we projected POWERFUL ≈ −8 vs gen-9 raw; PUCT-wrapped gen-9
+  measures +5.05 over POWERFUL.
+- **The internal crank's small gen-9 step is REAL strength:** the
+  +2.8/+4.2 internal raw gate showed up externally as +4.45/game
+  (p=0.0007) through a completely different harness. (gen-8d_mz vs
+  gen-7b_es was an external wash — the PUCT-flattens-policy-gains
+  pattern seen at gen-7-vs-6 — so the big internal +13.7 partially
+  masked externally, yet the next step transferred cleanly.)
+- **LIVE SIGNAL — JTR's operator may still be a teacher.** Every
+  model side in this run was JTR-PUCT-wrapped. Combining +5.05 (PUCT
+  gen-9 vs POWERFUL) with our ≈−5..−8 projection for RAW gen-9 vs
+  POWERFUL implies JTR's ISMCTS wrapper still extracts roughly +10
+  over raw from the same gen-9 net — where OUR operator extracts −1
+  (saturated, 2026-07-06). Cross-run and indirect, so it needs one
+  direct measurement: **gen-9 real-PUCT vs gen-9 raw (`--pgx-raw`),
+  250 pairs, in JTR's harness.**
+
+**DECISION (2026-07-07): milestone recorded; Step 4's external goal
+vs JTR is MET. One measurement decides the next branch — the JTR-side
+gen-9 PUCT-vs-raw operator margin:**
+- **~+10 confirmed** → JTR's search operator improves on a net ours
+  can't improve; port its algorithmic diffs into `jass_puct.py`
+  (code/ideas fair game, games not) as the gen-10 teacher candidate.
+- **≈0** → gen-9 is saturated against the whole JTR-class operator
+  family; reframe to stronger external targets (JTR++, KUS) and
+  B-capacity on its own merits.

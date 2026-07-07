@@ -60,18 +60,27 @@ mis-tuned by the 1/9 flat prior) but that's still double-digit
 negative — no readout or tuning makes in-house classical search a
 teacher at this budget class. Search-operator probing is DONE.**
 
-**NEXT (2026-07-07): gen-9 JTR re-calibration — THE branch point.**
-Export gen-9 → JTR real-PUCT harness vs POWERFUL. Converging
-prediction: our classical at 1,024 exp/move ≈ −11 vs gen-9, POWERFUL
-+8.5 vs gen-7-era ≈ −8 vs gen-9 projected — both say gen-9 ≈
-classical-search parity, so expect POWERFUL ≈ 0/negative.
-- **Confirmed (POWERFUL ≈ 0/negative):** Step 4's external goal is
-  effectively MET without training on JTR; reframe to stronger
-  calibration targets (JTR++, KUS) and B-capacity on its own merits.
-- **Refuted (real headroom remains):** the surviving in-house levers
-  are (a) determinization QUALITY — learned who-has-card sampling
-  trained on OUR self-play games (idea class from JTR ideas.md, zero
-  JTR game data) — and (b) porting JTR PUCT algorithmic diffs.
+**EXTERNAL MILESTONE (2026-07-07, log; JTR commit caa33f9): gen-8d_mz
+and gen-9 cross ABOVE classical POWERFUL in JTR's real-PUCT harness —
++4.2 and +5.05/game (p=0.0028 / p=0.0003). Trendline complete: −22
+(gen-3) → −9.5 (gen-5b) → ≈0 (gen-6/7) → +4..+5. Step 4's external
+goal is MET with zero JTR games in training — the generality bet
+paid. The internal gen-9 step also transferred (+4.45/game external,
+p=0.0007).**
+
+**NEXT (2026-07-07): one JTR-side measurement decides the branch —
+gen-9 real-PUCT vs gen-9 raw (`--pgx-raw`, 250 pairs, SWEEP_64).**
+Indirect evidence says JTR's ISMCTS wrapper still extracts ~+10 over
+raw from gen-9 (PUCT gen-9 = +5.05 over POWERFUL; raw gen-9 projected
+≈ −5..−8) — where our own operator extracts −1 (saturated).
+- **~+10 confirmed** → JTR's operator improves a net ours can't:
+  port its algorithmic diffs into `jass_puct.py` (code/ideas fair
+  game, games not) as the gen-10 teacher candidate.
+- **≈0** → gen-9 is saturated vs the whole JTR-class operator family;
+  reframe to stronger external targets (JTR++, KUS) and B-capacity on
+  its own merits. Determinization quality (learned who-has-card
+  sampling on OUR self-play data) stays parked as the other in-house
+  lever.
 NO JTR games in the training mix in any branch (2026-07-05, Step 4b).
 
 ## Previous snapshot (2026-07-06 — gen-8d_mz)
@@ -89,8 +98,9 @@ see the 2026-07-06 log arc.
 
 ## Previous snapshot (2026-07-05)
 
-**EXTERNAL MILESTONE (2026-07-05): the gap to JTR's classical POWERFUL
-has closed to ZERO.** gen-6b_es and gen-7, exported through the new
+**EXTERNAL MILESTONE (2026-07-05, SUPERSEDED 2026-07-07 — the lineage
+is now ABOVE POWERFUL, see the snapshot above): the gap to JTR's
+classical POWERFUL closed to ZERO.** gen-6b_es and gen-7, exported through the new
 attn scripts and run through JTR's real-PUCT harness (SWEEP_64, 250
 pairs each): gen-6b_es vs gen-5b **+6.75/game p<0.0001** (external
 confirmation of the internal climb), both attn gens vs POWERFUL
@@ -659,7 +669,7 @@ Levers, **REORDERED by the measurement** (batch-fix first, then chips):
    subtree reuse (re-determinize every move, nothing to carry); any
    data-parallel trick (collection is *already* the parallel stage).
 
-## Step 4 — Scale and benchmark externally  [Status: IN PROGRESS — external benchmark DONE (gen-3 calibrated 2026-06-20, gen-5b re-calibrated 2026-07-02: gap to POWERFUL roughly HALVED, −22/game → ≈−9.5/game; gen-6b_es/gen-7 re-calibrated 2026-07-05: gap CLOSED TO ZERO, both flat ns vs POWERFUL). Net scaling: IN PROGRESS since 2026-07-03 — value head first (attention over the 36 card rows vs mean pooling), per the sharpening-probe DECISION in the log: no search axis re-opens the operator on the current net, the leaf evaluator is the cap. First arm (gen-6b, shared-trunk PolicyValueNetAttn, standing recipe) first arm resolved 2026-07-03: full-20k training OVERFITS (value head fits seen data 0.073 vs holdout 0.147; gen-5b's gap is zero) but **early-stopped at 7k it PROMOTED — gen-6b_es is CHAMPION** (raw +10.3/+7.4, PUCT@64 +5.2 p=0.01, first significant deployed gain since gen-3). Remaining: weight-decay arm to replace hand-picked stopping; attn support in the JTR export scripts; re-profile collection for the attn net — see jass_sop.md "Current strategic state" and the log entries]
+## Step 4 — Scale and benchmark externally  [Status: EXTERNAL GOAL MET 2026-07-07 — gen-8d_mz/gen-9 re-calibrated: both ABOVE POWERFUL (+4.2 / +5.05 per game, p=0.0028 / p=0.0003, JTR commit caa33f9), zero JTR games in training. Trendline: gen-3 −22/game (2026-06-20) → gen-5b ≈−9.5 (2026-07-02) → gen-6b_es/gen-7 ≈0 (2026-07-05) → gen-8d_mz/gen-9 +4..+5 (2026-07-07). Net scaling: IN PROGRESS since 2026-07-03 — value head first (attention over the 36 card rows vs mean pooling), per the sharpening-probe DECISION in the log: no search axis re-opens the operator on the current net, the leaf evaluator is the cap. First arm (gen-6b, shared-trunk PolicyValueNetAttn, standing recipe) first arm resolved 2026-07-03: full-20k training OVERFITS (value head fits seen data 0.073 vs holdout 0.147; gen-5b's gap is zero) but **early-stopped at 7k it PROMOTED — gen-6b_es is CHAMPION** (raw +10.3/+7.4, PUCT@64 +5.2 p=0.01, first significant deployed gain since gen-3). Remaining: weight-decay arm to replace hand-picked stopping; attn support in the JTR export scripts; re-profile collection for the attn net — see jass_sop.md "Current strategic state" and the log entries]
 
 - Net scaling: attention over the 36 card rows is the natural upgrade from
   mean pooling; then width/depth, more simulations, larger batches.

@@ -46,17 +46,27 @@ evidence on classical search strength. And the existence proof is
 STALE: POWERFUL's +8.5 was vs gen-7-era raw; gen-9 is ≈+16 internal
 points above that, so POWERFUL's edge over gen-9 may already be ≈0.
 
-**NEXT (2026-07-06): (1) gen-9 JTR re-calibration — DECISION-CRITICAL
+**qsum READOUT BUILT AND RE-PROBED (2026-07-06/07, log): classical
+16×64 read by sign-safe mean-Q = −42.3 vs gen-9 raw** (after a
+score-sum sign bug voided a −61 first read) — mean-Q is noise-seeking
+on single-rollout evals; JTR's Σ N·score ≈ robust child, and no
+readout rescues the arm as configured. **But the arm has a live
+pb_c confound:** 1.25 is net-prior-tuned; a 1/9 flat prior shrinks
+PUCT exploration ~9×.
+
+**NEXT (2026-07-07): (1) gen-9 JTR re-calibration — DECISION-CRITICAL
 (owed anyway).** Export gen-9 → JTR real-PUCT harness vs POWERFUL.
-Still clearly below → headroom real: **(2) build the Q-sum-over-
-determinizations readout knob** (JTR's aggregation; correct for
-uniform-prior search where argmax-visits reads noise) and re-probe
-classical λ=1 w=1 at K=45×64 (POWERFUL-parity, in-house) — a win =
-the gen-10 teacher. gen-9 ≈/above POWERFUL → the equal-compute
-existence proof is gone (we've caught classical search at this budget
-class); reframe: above-parity teachers (budget + B-capacity) or
-stronger external calibration targets (JTR++, KUS). NO JTR games in
-the training mix in any branch (2026-07-05, Step 4b).
+**(2) Last classical probe: pb_c ∈ {5.6, 11.2} (undoes the 1/9 prior
+rescale), 16×64, both readouts.** Still double-digit negative → the
+in-house classical-teacher branch is DEAD at this budget class. On a
+headroom verdict from (1), the remaining in-house levers are
+(a) determinization QUALITY — learned who-has-card sampling trained
+on OUR self-play games (idea class from JTR ideas.md, zero JTR game
+data) — and (b) porting JTR PUCT algorithmic diffs. gen-9 ≈/above
+POWERFUL → the equal-compute existence proof is gone; reframe:
+stronger external calibration targets (JTR++, KUS), B-capacity on
+its own merits. NO JTR games in the training mix in any branch
+(2026-07-05, Step 4b).
 
 ## Previous snapshot (2026-07-06 — gen-8d_mz)
 

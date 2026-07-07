@@ -2021,3 +2021,46 @@ pass. The −61 number is VOID; both qsum arms rerun with the fix:
 - 16×64 as before;
 - 45×64 with **PAIRS_PER_CHIP=4, ROUNDS=10** (same 320 pairs, half
   the per-chip working set) to stay under the memory knee.
+
+## 2026-07-07 — Fixed qsum re-read: classical 16×64 = −42.3 vs gen-9 raw — mean-Q is noise-seeking with single-rollout evals; and the arm itself has a pb_c CONFOUND (exploration tuned for net priors)
+
+The sign-safe mean-Q readout on the classical λ=1/w=1 arm (16×64,
+standing harness): **−42.3 mean/game vs gen-9 raw** — still worse
+than the −24.3 visits readout. (45×64 arm not rerun.)
+
+Two lessons, one live confound:
+
+- **Mean-Q argmax = max of noisy means.** Leaf evals are single
+  uniform-random playouts (±157-scale variance); at 64 sims over ~9
+  actions an action carries ~7 visits/tree. Argmax over per-action
+  means systematically selects the luckiest-sampled action, not the
+  best one. Robust-child (max visits) is the standard UCT readout for
+  exactly this reason.
+- **JTR's Σ N·score is ≈ robust child, not max-Q.** With non-negative
+  per-leaf scores the visit mass dominates the sum, so JTR's readout
+  is robust-child with a quality tilt. The 07-06 "readout confound"
+  story was half right (visits underread the classical arm vs random:
+  +10.8 vs +32.2) but readout choice does NOT explain the gap to
+  gen-9 — no readout rescues this arm as configured.
+- **The live confound: pb_c=1.25 is net-prior-tuned.** PUCT explores
+  by c·P(a)·√N/(1+n); flattening P from a concentrated net prior to
+  1/9 mechanically shrinks the exploration term ~5–9×. The classical
+  arm searched at an effective c ≈ 1.25/9 ≈ 0.14, while JTR's
+  classical operator runs at ≈ 0.64 normalized (its c=100 on the raw
+  point scale) — an over-greedy tree that commits to lucky rollout
+  lines. Uniform-prior PUCT tying JTR's UCB baseline (their
+  heuristic-prior experiment) was measured at *their* c, not ours/9.
+
+**DECISION (2026-07-07): one last cheap classical probe — rescale
+exploration for flat priors: pb_c ∈ {5.6, 11.2} (≈ 0.64×9 and 2×
+that), 16×64, BOTH readouts, standing harness. This is the fair
+version of the classical arm, not knob-fishing: the flat prior
+rescaled c by 1/9, the sweep undoes it. If the best arm is still
+double-digit negative vs gen-9 raw, the in-house classical-teacher
+branch is DEAD at this budget class regardless of readout — then the
+gen-9 JTR re-calibration (still owed, still decision-critical) is the
+only open question, and the remaining in-house levers on a headroom
+verdict are (a) determinization QUALITY (learned who-has-card
+sampling trained on OUR self-play games — idea class from JTR's
+ideas.md, zero JTR game data) and (b) porting JTR PUCT algorithmic
+diffs.**

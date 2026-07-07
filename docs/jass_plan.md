@@ -68,20 +68,27 @@ goal is MET with zero JTR games in training — the generality bet
 paid. The internal gen-9 step also transferred (+4.45/game external,
 p=0.0007).**
 
-**NEXT (2026-07-07): one JTR-side measurement decides the branch —
-gen-9 real-PUCT vs gen-9 raw (`--pgx-raw`, 250 pairs, SWEEP_64).**
-Indirect evidence says JTR's ISMCTS wrapper still extracts ~+10 over
-raw from gen-9 (PUCT gen-9 = +5.05 over POWERFUL; raw gen-9 projected
-≈ −5..−8) — where our own operator extracts −1 (saturated).
-- **~+10 confirmed** → JTR's operator improves a net ours can't:
-  port its algorithmic diffs into `jass_puct.py` (code/ideas fair
-  game, games not) as the gen-10 teacher candidate.
-- **≈0** → gen-9 is saturated vs the whole JTR-class operator family;
-  reframe to stronger external targets (JTR++, KUS) and B-capacity on
-  its own merits. Determinization quality (learned who-has-card
-  sampling on OUR self-play data) stays parked as the other in-house
-  lever.
-NO JTR games in the training mix in any branch (2026-07-05, Step 4b).
+**SEARCH-OPERATOR HUNT CLOSED (2026-07-07, log): gen-9 saturates
+BOTH operators.** JTR's mature classical determinized MCTS extracts
+only +1.5/game ns over gen-9 raw (its gen-7 margin was +10.15***),
+and our muzero PUCT extracts −1.0 — two independent operators agree
+gen-9 has absorbed all this search *class* can add. Raw gen-9 alone
+trends above POWERFUL (+2.5, p=0.076). Porting JTR's PUCT diffs is off
+the table: no operator margin left to harvest. (My prior +10
+projection was wrong — it reused the stale gen-7 raw-vs-POWERFUL
+baseline; the raw policy is exactly what improved.)
+
+**NEXT (2026-07-07): B-capacity scaling, measured against POWERFUL.**
+POWERFUL stays the yardstick — beat it by a bigger margin each
+generation (no harder benchmark needed yet; the +2.5 edge has room).
+**gen-10 = a wider net on a fresh corpus, standing muzero recipe.**
+The "capacity only paired with a stronger teacher" gate is void — the
+gate WAS the operator, now saturated, so with no operator headroom
+capacity is the direct lever for a stronger raw policy (what carries
+strength now). NOT a lever: learned determinization sampling — a
+documented NOT-retry negative (see "Negative results"), and JTR's
+cheating probe ruled out determinization noise as the raw gap's cause.
+NO JTR games in the training mix (2026-07-05, Step 4b).
 
 ## Previous snapshot (2026-07-06 — gen-8d_mz)
 

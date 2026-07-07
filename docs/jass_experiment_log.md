@@ -2145,3 +2145,55 @@ gen-9 PUCT-vs-raw operator margin:**
 - **≈0** → gen-9 is saturated against the whole JTR-class operator
   family; reframe to stronger external targets (JTR++, KUS) and
   B-capacity on its own merits.
+
+## 2026-07-07 — RESOLVED: JTR's operator margin on gen-9 = +1.5/game ns — the ≈0 branch. Search saturation confirmed across TWO independent operators; my +10 projection was wrong
+
+The direct measurement (JTR experiment_log.md § "gen-9 raw vs PUCT",
+250 pairs / 500 games, seed 42, SWEEP_64, same gen-9 net both sides):
+
+| matchup | per-game | p | verdict |
+|:--|:--|:--|:--|
+| gen-9 PUCT vs gen-9 raw | **+1.5** | 0.1596 | ns — operator margin gone |
+| gen-9 raw vs POWERFUL | +2.5 | 0.0760 | raw itself trends ABOVE POWERFUL |
+
+- **The ≈0 branch, decisively. My "+10, JTR's operator is a teacher"
+  projection (previous entry) was WRONG** — I anchored raw gen-9 at
+  ≈−5..−8 vs POWERFUL by reusing the STALE gen-7 raw number (−8.5).
+  In reality raw gen-9 has climbed ~+11 over two generations to +2.5
+  ABOVE POWERFUL, so the PUCT-over-raw gap it left is +1.5, not +10.
+  Lesson: never carry a raw-vs-external baseline across generations —
+  the raw policy is exactly what's improving.
+- **Saturation is now confirmed across TWO independent operators:**
+  our muzero PUCT extracts −1.0 over gen-9 raw (2026-07-06); JTR's
+  mature classical determinized MCTS extracts +1.5 ns (this run). Two
+  unrelated determinized-search implementations agree gen-9 policy has
+  absorbed ~all the improvement this operator *class* can add — a far
+  stronger fixed-point result than either operator alone. The gen-7→9
+  collapse is monotone: JTR's operator margin went +10.15*** (gen-7)
+  → +1.5 ns (gen-9) as the net strengthened.
+- **Porting JTR's PUCT diffs is OFF the table as a gen-10 teacher** —
+  there is no operator margin left to harvest, even from a mature
+  classical implementation. The escape from the fixed point is NOT a
+  better search operator of this class from any source.
+
+**DECISION (2026-07-07): the gen-10-teacher hunt via better search is
+CLOSED (own ops, budget/depth sweeps, flat-prior classical, JTR-op
+port — all saturated). Step 4's external goal is MET and then some
+(raw gen-9 alone ~ties/beats POWERFUL). POWERFUL stays the yardstick
+— it's a fixed, well-understood reference, and the margin over it is
+the progress metric now; the goal is simply to beat it by more each
+generation (no need for a harder external benchmark yet — the +2.5
+edge has ample measurement room before saturating high). With the
+operator saturated, the primary lever is:**
+1. **B-capacity scaling on a fresh gen-10 corpus** — now on its own
+   merits, not gated on a stronger teacher (that gate WAS the
+   saturated operator; with no operator headroom, capacity is the
+   direct lever for a stronger *raw* policy, which is what carries
+   strength now). Collect gen-10 with the standing muzero recipe,
+   train a wider net; success = a bigger margin over POWERFUL.
+
+NOT a lever: learned determinization sampling (who-has-card model). It
+is a documented NOT-retry negative (JTR CardsEstimator + AR variants:
+no signal vs uniform, ≥1000 games; plan "Negative results"), and
+JTR's own cheating probe RULED OUT determinization noise as the raw
+gap's cause (perfect info moved −8.5 → only −7.5). Both facts kill it.

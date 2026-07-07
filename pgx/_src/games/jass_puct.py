@@ -17,7 +17,9 @@ Grounded-teacher knobs (2026-07-06, the gen-9 fixed-point escape —
 see the plan's NEXT block): `prior_mix_uniform` mixes the net's priors
 toward uniform-over-legal at every node; `rollout_value_weight` blends
 leaf values toward a uniform-random playout-to-terminal return (real
-points). At 1.0/1.0 the search is a classical, net-free ISMCTS.
+points). At 1.0/1.0 the search is classical, net-free determinized
+MCTS (per-world trees over sampled determinizations, then aggregated
+— PIMC family, like JTR's POWERFUL; not single-tree ISMCTS).
 
 Sign conventions (mctx backs up q(parent, a) = reward + discount * v(child)):
 - every node's value is from the perspective of the player to move there

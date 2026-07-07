@@ -2130,7 +2130,7 @@ POWERFUL as the external opponent):
 - **LIVE SIGNAL — JTR's operator may still be a teacher.** Every
   model side in this run was JTR-PUCT-wrapped. Combining +5.05 (PUCT
   gen-9 vs POWERFUL) with our ≈−5..−8 projection for RAW gen-9 vs
-  POWERFUL implies JTR's ISMCTS wrapper still extracts roughly +10
+  POWERFUL implies JTR's determinized-MCTS wrapper still extracts +10
   over raw from the same gen-9 net — where OUR operator extracts −1
   (saturated, 2026-07-06). Cross-run and indirect, so it needs one
   direct measurement: **gen-9 real-PUCT vs gen-9 raw (`--pgx-raw`),

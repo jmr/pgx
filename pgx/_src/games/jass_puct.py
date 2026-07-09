@@ -1,9 +1,10 @@
 """Determinized PUCT for Jass via mctx (Option B) — the AlphaZero search.
 
 For each of K determinizations of the current information state, run a
-batched tree search — `mctx.gumbel_muzero_policy` by default, or classical
-full-width PUCT via `mctx.muzero_policy` (`search_variant="muzero"`, the
-JTR-style operator; A′ probe 2026-07-06) — with the PolicyValueNet
+batched tree search — classical full-width PUCT via `mctx.muzero_policy`
+by default (`search_variant="muzero"`, the JTR-style operator and standing
+collector since the 2026-07-06 pivot), or the retired
+`mctx.gumbel_muzero_policy` (`search_variant="gumbel"`) — with the PolicyValueNet
 supplying priors and leaf values, and the real game engine (`Game.step`)
 as the dynamics. The K trees are aggregated by SUMMING ROOT
 VISIT COUNTS and acting on the summed counts — the load-bearing choice from
@@ -198,7 +199,7 @@ def puct_search(
     num_simulations: int = 64,
     v_scale: float = 100.0,
     max_num_considered_actions: int = 16,
-    search_variant: str = "gumbel",
+    search_variant: str = "muzero",
     pb_c_init: float = 1.25,
     dirichlet_fraction: float = 0.0,
     prior_mix_uniform: float = 0.0,
@@ -217,10 +218,13 @@ def puct_search(
         v_scale: Net output → points (TARGET_SCALE of the training run).
         max_num_considered_actions: Gumbel sequential-halving width at the
             root. Gumbel variant only.
-        search_variant: "gumbel" (default, `mctx.gumbel_muzero_policy` —
-            the standing collector) or "muzero" (`mctx.muzero_policy`,
-            classical full-width PUCT — the JTR-style operator, A′ probe
-            2026-07-06).
+        search_variant: "muzero" (default, `mctx.muzero_policy` —
+            classical full-width PUCT, the JTR-style operator and the
+            standing collector since the 2026-07-06 searcher pivot) or
+            "gumbel" (`mctx.gumbel_muzero_policy` — the retired
+            summed-visit teacher; kept for the parked C′ efficiency
+            probe only, DO NOT use as a collector: its visit readout is
+            the impedance mismatch behind the gen-8 fixed point).
         pb_c_init: Classical-PUCT exploration constant on mctx's
             per-node-normalized Q. Muzero variant only. JTR's c=100 on
             the raw 0–157 point scale ≈ 0.64 here.
@@ -324,7 +328,7 @@ def puct_action(
     num_simulations: int = 64,
     v_scale: float = 100.0,
     max_num_considered_actions: int = 16,
-    search_variant: str = "gumbel",
+    search_variant: str = "muzero",
     pb_c_init: float = 1.25,
     dirichlet_fraction: float = 0.0,
     prior_mix_uniform: float = 0.0,
@@ -350,7 +354,7 @@ def make_puct_policy_fn(
     num_simulations: int = 64,
     v_scale: float = 100.0,
     max_num_considered_actions: int = 16,
-    search_variant: str = "gumbel",
+    search_variant: str = "muzero",
     pb_c_init: float = 1.25,
     dirichlet_fraction: float = 0.0,
     prior_mix_uniform: float = 0.0,
@@ -422,7 +426,7 @@ def make_puct_collect_fn(
     num_simulations: int = 64,
     v_scale: float = 100.0,
     max_num_considered_actions: int = 16,
-    search_variant: str = "gumbel",
+    search_variant: str = "muzero",
     pb_c_init: float = 1.25,
     dirichlet_fraction: float = 0.0,
     prior_mix_uniform: float = 0.0,

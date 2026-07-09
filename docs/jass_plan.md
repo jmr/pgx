@@ -78,6 +78,16 @@ the table: no operator margin left to harvest. (My prior +10
 projection was wrong — it reused the stale gen-7 raw-vs-POWERFUL
 baseline; the raw policy is exactly what improved.)
 
+**LEARNED TRUMP WINS (2026-07-08, log; JTR commit 398db0e): enabling
+the net's trump head (`--pgx-trump`, argmax of the DECLARE logits)
+beats the rule heuristic +1.7/game (2000 pairs, p≈0.004) and roughly
+DOUBLES the margin over POWERFUL — raw 2.5→6.8, PUCT 5.05→11.6/game —
+amplifying with card-play strength. First validated net win outside
+card play; the symmetric-blind-spot worry resolved favorably (the
+least-validated head is genuinely better than a decades-tuned
+heuristic). The net now drives both phases; trump was already trained
+by self-play (same policy over DECLARE actions), so no recipe change.**
+
 **NEXT (2026-07-07): B-capacity scaling, measured against POWERFUL.**
 POWERFUL stays the yardstick — beat it by a bigger margin each
 generation (no harder benchmark needed yet; the +2.5 edge has room).

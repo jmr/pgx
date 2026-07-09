@@ -2197,3 +2197,80 @@ is a documented NOT-retry negative (JTR CardsEstimator + AR variants:
 no signal vs uniform, ≥1000 games; plan "Negative results"), and
 JTR's own cheating probe RULED OUT determinization noise as the raw
 gap's cause (perfect info moved −8.5 → only −7.5). Both facts kill it.
+
+## 2026-07-08 — LEARNED TRUMP SELECTION beats the heuristic AND ~doubles the margin over POWERFUL — the net's first validated win outside card play; symmetric-blind-spot worry resolved FAVORABLY
+
+The trump-head probe (my 2026-07-07 side-probe suggestion) landed
+decisively. Source: JTR repo commit `398db0e` (`--pgx-trump`: pick
+trump by argmax of the pgx policy head's trump logits, indices 36–42,
+averaged over the trumpf-phase determinization count — forward passes,
+no search, no value head; Schiebe/logit-42 masked once already
+shifted). Card play held IDENTICAL on both teams — the same isolation
+trick as `--pgx-raw` — so every delta is the trump switch alone.
+
+**A/B, net trump vs rule trump, raw cards both sides (2000 pairs pooled):**
+
+| seed | per-game | p |
+|:--|:--|:--|
+| 42 | +2.1 | 0.0091 |
+| 43 | +1.3 | 0.1263 |
+| **pooled 2000** | **≈+1.7** | **≈0.004** |
+
+Net trump beats the hand-tuned heuristic by ≈+1.7/game. Both seeds
+positive; the split is the known un-seeded determinization RNG (a true
+≈+3.4/pair effect vs SE≈1.6/pair sits on the significance boundary, so
+single 1000-pair seeds scatter — pooled it's decisive).
+
+**vs POWERFUL — the gain MORE THAN ADDS onto the card-play edge:**
+
+| matchup | per-game | p |
+|:--|:--|:--|
+| raw + **net** trump vs POWERFUL (500 pairs pooled) | **≈+6.8** | ≈1e-6 |
+| raw + rule trump vs POWERFUL (baseline, seed 42) | +2.5 | 0.076 |
+| PUCT + **net** trump vs POWERFUL (50 pairs, seed 42) | **+11.6** | 0.0044 |
+| PUCT + rule trump vs POWERFUL (baseline) | +5.05 | 0.0003 |
+
+Enabling learned trump roughly DOUBLES the margin over POWERFUL at
+both card-play strengths (2.5→6.8 raw, 5.05→11.6 PUCT). And the trump
+switch amplifies monotonically with card-play strength:
+
+| card backdrop | trump switch (rule→net) |
+|:--|:--|
+| raw vs raw | +2.1/game |
+| raw vs POWERFUL | +4.3/game |
+| PUCT vs POWERFUL | +6.55/game |
+
+Reading: a stronger card player converts the positional edge a good
+trump creates instead of squandering it — POWERFUL also punishes a bad
+trump harder — so getting trump right compounds.
+
+**Why this matters for us:**
+- **First validated win for the net OUTSIDE card play**, and it
+  RESOLVES the symmetric-blind-spot worry (2026-07-07) in the good
+  direction: trump was the least-validated head (longest-horizon
+  value, invisible to self-play if symmetric), and it turns out the
+  learned trump is genuinely *better* than a decades-tuned heuristic,
+  not a hidden weakness. The +5.05 and +2.5 vs POWERFUL had used
+  heuristic trump on both sides, so this is a net-new, previously
+  untested component paying off.
+- **End-to-end all-net play:** trump was the last rule-based component
+  on an otherwise all-net team; the net now drives both phases.
+  "Beat POWERFUL by more" — achieved, ~2×, by enabling a head we
+  already had.
+- Unlike rule/MCTS trump ("never shifts by itself"), the net DOES
+  choose Schiebe when the hand warrants it.
+
+**Caveats (from source):** un-seeded determinization RNG (single seeds
+scatter, hence pooling); the PUCT-vs-POWERFUL row is a single 50-pair
+seed (clears at p=0.0044) and its baseline is cross-run, so the "~2×"
+multipliers are approximate though direction-confirmed on all three
+backdrops; ~5% invalid-card→random fallback on the raw path (tiny,
+mildly asymmetric net vs rule; PUCT path is ~1%).
+
+**DECISION (2026-07-08): learned trump PROMOTED as the deployed trump
+selector (JTR side). For the pgx research line it is a strength
+milestone and a generality datapoint, not a redirection — gen-10 stays
+B-capacity scaling. The self-play recipe ALREADY trains the trump head
+(it's the same policy over DECLARE actions), so no collection change is
+needed; the gen-10 gate should just keep measuring the growing margin
+over POWERFUL with net trump now enabled on the pgx side.**

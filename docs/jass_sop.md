@@ -14,10 +14,14 @@ generation. **Since 2026-07-06 the anchors are STRINGS, three tokens**
 on failed attempts):
 
 ```python
-CHAMP = "7b_es"          # champion label — the params file you LOAD
+CHAMP = "9"              # champion label — the params file you LOAD
 SRC   = CHAMP + "_mz"    # corpus namespace: champion + teacher-recipe tag
-GEN   = "8d_mz"          # the student this run PRODUCES
+GEN   = "10a"            # the student this run PRODUCES (sweep: 10-ctrl/10a/10b/10c)
 ```
+
+For a **capacity sweep** (gen-10 onward) CHAMP/SRC are fixed across arms
+(one shared corpus) and only GEN changes per arm — see "gen-10 —
+capacity sweep" below.
 
 ⚠ Never build the champion-load path from `SRC` — the recipe tag makes
 it a nonexistent file; and label gate baselines with `CHAMP`, not
@@ -170,7 +174,74 @@ Diagnostics:
   raw. Large + while PUCT-vs-PUCT is flat = the search is masking real policy
   gains (this is now the standing gate, above).
 
-## Current strategic state (2026-07-06, post-gen-8d_mz promotion)
+## gen-10 — capacity sweep (2026-07-09, CURRENT)
+
+The operator is saturated (both muzero PUCT and JTR's classical MCTS
+extract ≈0 over gen-9 raw — plan snapshot 2026-07-07), so capacity is
+the lever for a stronger *raw* policy. gen-10 is a **sweep of student
+architectures on ONE shared corpus**, not a single net.
+
+**Why one corpus feeds every arm:** collection runs the CHAMPION
+(gen-9) as the search generator; the *student* net you train afterward
+never touches Stage 1. So each extra arm costs only a 20k train + a
+gate — no new collection. This is what makes gen10-ctrl/a/b/c cheap.
+
+**Stage 1 — collect ONCE** (CHAMP=`9`, load `pv_gen9_s128.msgpack`
+with `PolicyValueNetAttn().apply`). Standing muzero recipe per Stage 1
+above: `make_puct_policy_fn(attn.apply, src_params,
+num_determinizations=16, num_simulations=64, search_variant="muzero",
+pb_c_init=1.25, dirichlet_fraction=0, temperature=1.0)`. (`"muzero"`
+is now the code DEFAULT — landed 2026-07-09 — but pass it explicitly.)
+Collect **LARGER than the 64k standard: target ~128k = 64×2048**
+(restart-safe per-shard) so the wide arms have data and so a
+`batches[:32]` subsample gives a free dose-response check. Re-run
+`profile_collect_fn` first (K/sims unchanged from gen-9, so per-chip
+B=8 should still hold).
+
+**Stage 2 — train the arms** (all on the shared corpus; full 20k,
+`data_parallel=True`, ES armed). One axis at a time off the gen-9
+baseline (`hidden 128 / num_layers 2 / num_heads 4`, ~393k params):
+
+| GEN | model kwargs | file | tests |
+|:--|:--|:--|:--|
+| `10-ctrl` | `PolicyValueNetAttn()` | `pv_gen10-ctrl_h128.msgpack` | corpus refresh alone (control) |
+| `10a` | `PolicyValueNetAttn(hidden=256, num_heads=8)` | `pv_gen10a_h256.msgpack` | width (~4× params) — headline |
+| `10b` | `PolicyValueNetAttn(num_layers=4)` | `pv_gen10b_h128.msgpack` | depth at current width |
+| `10c` *(cond.)* | `PolicyValueNetAttn(hidden=256, num_heads=8, num_layers=4)` | `pv_gen10c_h256.msgpack` | combine — only if a/b clears |
+
+- **Filename tag = `h{hidden}` (width), NOT `s`.** ⚠ The historical
+  `s128` tag means sims=128 (the corpus `num_simulations` — see the
+  `corpus_..._s128k8` naming), which is coincidentally equal to the
+  net's `hidden`; the muzero recipe dropped to sims=64 so `s` is now
+  vestigial. Use `h{hidden}` here so width is unambiguous; the GEN
+  token already disambiguates arms regardless.
+- `num_heads` must divide `hidden` (keep head_dim=32: 128→4, 256→8).
+- **Run ctrl + a + b first, read them, THEN decide on 10c.** Don't
+  fan out all four at once — you want to know if capacity moves the
+  needle before spending the combine arm.
+- **Watch the U-curve.** The muzero teacher is what let 128/2 train
+  full 20k with no overfit (holdout v 0.0655); wider nets have more
+  room to memorize. Keep `snapshot_every=500`, watch holdout v,
+  early-stop (`_es` suffix) only if an upturn appears.
+- Separate `checkpoint_path` per arm (distinct GEN token).
+
+**Stage 3 — gate** each arm raw-vs-raw vs **gen-9**
+(`pv_gen9_s128.msgpack`, `src_params`), two seeds, p<0.05 (Stage 3
+above). Best clearing arm → gen-10 champion. Losing arms keep their
+suffix — attempts, not failures.
+
+**Dose-response (post-winner, free):** retrain the winning arch on
+`batches[:32]` (64k) and gate vs the full-128k net — separates "needs
+more capacity" from "needs more data."
+
+**External (DEFERRED, DECISION 2026-07-09):** the vs-POWERFUL number
+(net trump on) needs the export scripts taught the arch dims —
+`scripts/export_pv_savedmodel.py` hardcodes `HIDDEN=128` and has no
+`--hidden/--heads/--layers` CLI flags (the keras mirror constructor
+already accepts them). Add those flags **only once we have a winning
+arch worth exporting** — not before.
+
+## Current strategic state (SUPERSEDED — see gen-10 sweep above; kept for the gen-8d_mz recipe detail)
 
 **CHAMPION: gen-8d_mz (`pv_gen8d_mz.msgpack`) — `PolicyValueNetAttn`,
 64k muzero corpus (K=16×64, pb_c=1.25), full 20k (NO early stop

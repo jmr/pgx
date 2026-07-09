@@ -100,6 +100,36 @@ documented NOT-retry negative (see "Negative results"), and JTR's
 cheating probe ruled out determinization noise as the raw gap's cause.
 NO JTR games in the training mix (2026-07-05, Step 4b).
 
+**gen-10 = a CAPACITY SWEEP, not one net (design 2026-07-09; procedure
+in jass_sop.md "gen-10 — capacity sweep").** The load-bearing insight:
+the corpus is TEACHER-defined (gen-9 + standing muzero search) and
+totally independent of the STUDENT architecture, so we collect ONE
+corpus and train several student widths/depths on it — each extra arm
+is just a 20k train + a raw gate, not a fresh collection. Arms, one
+axis at a time off the gen-9 baseline (`hidden 128 / layers 2 /
+heads 4`, ~393k params):
+- **gen10-ctrl** — 128/2/4, the SAME net on the fresh corpus. Isolates
+  the corpus-refresh gain from capacity (without it a win isn't
+  attributable; gen-9 already showed same-recipe iteration is thin,
+  +2.8/+4.2). Nearly free — shares the corpus.
+- **gen10a** — 256/2/8 (~4× params). The headline width bet.
+- **gen10b** — 128/4/4 (~2× params). Depth at current width.
+- **gen10c** *(conditional)* — 256/4/8 or 384/2/12. Combine/push ONLY
+  if a single axis clears. Read a/b first before spending it.
+Tag width with an `h{hidden}` suffix (`pv_gen10a_h256.msgpack`) — NOT
+the `s` tag, which means sims (the corpus `num_simulations`, now
+vestigial), not size; the GEN token (`10a` vs `10-ctrl`) already
+disambiguates the arms regardless. No flax code change — dims are
+`nn.Module` fields. Watch the
+U-curve: bigger nets have more room to memorize, so keep ES armed
+(the muzero teacher is what closed it at 128/2). Corpus collected
+LARGER than the 64k standard (target ~128k = 64×2048) to feed the wide
+arms and enable a dose-response subsample. Gate: raw-vs-raw vs gen-9,
+two seeds; best clearing arm promotes to gen-10. The vs-POWERFUL
+external number (net trump on) waits on the export-script `--hidden/
+--heads/--layers` flags — DEFERRED until we have a winning arch worth
+exporting (DECISION 2026-07-09).
+
 ## Previous snapshot (2026-07-06 — gen-8d_mz)
 
 **gen-8d_mz (`pv_gen8d_mz.msgpack`) — PROMOTED 2026-07-06,

@@ -209,12 +209,24 @@ baseline (`hidden 128 / num_layers 2 / num_heads 4`, ~393k params):
 | `10b` | `PolicyValueNetAttn(num_layers=4)` | `pv_gen10b_h128.msgpack` | depth at current width |
 | `10c` *(cond.)* | `PolicyValueNetAttn(hidden=256, num_heads=8, num_layers=4)` | `pv_gen10c_h256.msgpack` | combine — only if a/b clears |
 
-- **Filename tag = `h{hidden}` (width), NOT `s`.** ⚠ The historical
-  `s128` tag means sims=128 (the corpus `num_simulations` — see the
-  `corpus_..._s128k8` naming), which is coincidentally equal to the
-  net's `hidden`; the muzero recipe dropped to sims=64 so `s` is now
-  vestigial. Use `h{hidden}` here so width is unambiguous; the GEN
-  token already disambiguates arms regardless.
+- **Filename tag.** ⚠ The historical `s128` tag means sims=128 (the
+  corpus `num_simulations` — see the `corpus_..._s128k8` naming),
+  which is coincidentally equal to the net's `hidden`; the muzero
+  recipe dropped to sims=64 so `s` is now vestigial and does NOT track
+  width. The table above shows the ideal `h{hidden}` convention, but
+  **DECISION 2026-07-10: gen-10 keeps the vestigial `s128` in every
+  arm's filename** (the `checkpoint_path` var carried it, and a
+  mid-sweep rename would break snapshot/resume paths) — so the real
+  files are `pv_gen10a_..._s128...`. The GEN token (`10a` vs
+  `10-ctrl`) disambiguates arms regardless of the suffix. Actual gen-10
+  names also carry per-axis tags (`10a_h256`, `10b_l4`) on TOP of the
+  vestigial `s128`, and `s128` is injected in more than one call site —
+  so the names are a mild mess (e.g. `pv_gen10b_l4_s128...`), harmless
+  but ugly. **TODO gen-11 — full naming-convention review** (⚠ NEEDS
+  REVIEW, flagged 2026-07-10): drop `s128`, standardize on
+  `gen{N}{arch-tag}` where the tag encodes what varies (`h{hidden}`,
+  `l{layers}`), and de-duplicate the tag-injection sites. Do it at the
+  gen-11 boundary, not mid-gen-10 (rename breaks snapshot/resume paths).
 - `num_heads` must divide `hidden` (keep head_dim=32: 128→4, 256→8).
 - **Run ctrl + a + b first, read them, THEN decide on 10c.** Don't
   fan out all four at once — you want to know if capacity moves the

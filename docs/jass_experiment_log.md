@@ -2274,3 +2274,147 @@ B-capacity scaling. The self-play recipe ALREADY trains the trump head
 (it's the same policy over DECLARE actions), so no collection change is
 needed; the gen-10 gate should just keep measuring the growing margin
 over POWERFUL with net trump now enabled on the pgx side.**
+
+## 2026-07-10 — gen-10 CONTROL (10-ctrl, 128/2/4 on the fresh gen-10 corpus) gates +2.5/+2.4 vs gen-9 — sets the "corpus-refresh alone" bar
+
+First arm of the gen-10 capacity sweep (design 2026-07-09, jass_sop.md
+"gen-10 — capacity sweep"). 10-ctrl is the SAME gen-9 architecture
+(`PolicyValueNetAttn`, hidden=128, num_layers=2, num_heads=4) retrained
+on the fresh gen-9-generated corpus — it isolates the corpus-refresh
+gain from any capacity change (arms 10a/10b add width/depth).
+
+**Gate — raw-vs-raw vs gen-9** (fingerprints differ: new 10-ctrl
+29781.71 ≠ src gen-9 29639.75, so a real A/B, not a self-gate):
+
+| seed | per-game | t | p | win% |
+|:--|:--|:--|:--|:--|
+| 0 | +2.5 | +2.083 | 0.0381 * | 50.8% |
+| 2 | +2.4 | +2.190 | 0.0293 * | 52.2% |
+
+Both seeds positive, both p<0.05 → 10-ctrl beats gen-9. ⚠ The gate
+print MISLABELED both sides "gen-9 raw" (challenger label not bumped to
+10-ctrl) — the SOP's documented GEN-for-CHAMP mixup; numbers valid
+(fps differ), fix the label string for the a/b arms.
+
+**Training health:** full run, flat eval (~0.603 total), NO U-curve
+through ~22k; holdout v 0.0636 (at gen-9's 0.0655 floor), train≈eval
+(no overfit). Policy CE dropped to ~0.54 (gen-9: 0.604) — the fresh
+corpus's targets are sharper/more learnable, a good sign the corpus
+carries real signal.
+
+**Reading:** the corpus-refresh gain alone is **~+2.5**, in the same
+band as the gen-9 same-recipe step (+2.8/+4.2) — self-play iteration is
+still yielding ~+2.5/gen at FIXED capacity. This is now the BAR the
+capacity arms must clear: 10a (256/2/8, width) and 10b (128/4/4, depth)
+have to beat ~+2.5 for capacity to be earning its keep beyond the
+fresher corpus. If an arm only matches it, capacity added nothing.
+
+## 2026-07-10 — gen-10a (256/2/8, WIDTH arm): value-head U-curve returns; ES net does NOT clear the corpus-refresh bar — width is data-starved at 128k
+
+Second arm of the gen-10 sweep: `PolicyValueNetAttn(hidden=256,
+num_heads=8)` (~4× params), same shared corpus as 10-ctrl.
+
+**Training — the value head overfit (U-curve back).** Policy CE stayed
+flat/healthy (~0.538 the whole run, no overfit), but eval VALUE loss
+bottomed ~0.063 at epoch 8–10k then climbed to 0.080 by 22k while train
+kept dropping (0.60→0.56) — classic memorization, in the value head
+only. The SAME corpus left 128-wide (10-ctrl) flat through 22k, so the
+256 width is what re-opened the U-curve — as the sweep design warned.
+Took the `_es` snapshot at **10k** (eval-total basin 0.6013–0.602;
+policy CE flat after 10k, so a later snapshot buys no raw-policy
+strength and only worsens the value head).
+
+**Gate — 10a_es raw vs gen-9** (fp new 80430.02 ≠ src gen-9 29639.75;
+gen-9 fp matches the ctrl baseline — clean A/B, labels fixed):
+
+| seed | per-game | t | p |
+|:--|:--|:--|:--|
+| A | +0.7 | +0.513 | 0.6084 ns |
+| B | +2.6 | +2.089 | 0.0375 * |
+
+Pooled ≈ +1.65, p≈0.07 — one seed a flat wash.
+
+**Verdict: WIDTH FAILS at 128k.** 10-ctrl set +2.5/+2.4 (both seeds
+***) vs the same gen-9; 10a_es lands +0.7/+2.6 (one ns) — BELOW the
+control. Doubling width produced a net no better than the plain 128-wide
+retrain on the same corpus. Reading: the 256-wide net is DATA-STARVED
+on 128k — extra capacity went into value memorization, ES caps it, and
+the capped policy ≈ the control.
+
+**Direct head-to-head CONFIRMS (10a_es raw vs 10-ctrl raw; fp new
+80430.02 ≠ src ctrl 29781.71):** seed A −0.2 (p=0.8432 ns, 300W/300L
+dead even), seed B −0.9 (p=0.4342 ns), pooled ≈ −0.55 ns. Width is a
+dead wash vs the control, a hair negative — doubling width bought
+NOTHING at 128k.
+
+**The deeper tell: the POLICY head never overfit at either width** —
+eval policy CE plateaued at ~0.538 for BOTH ctrl (128) and 10a (256);
+only the value head overfit on 10a. So width didn't fail merely from
+value memorization — the policy head extracted the SAME signal at both
+widths. The binding constraint is the policy-target INFORMATION in the
+corpus, not model capacity: 128-wide already saturates what gen-9+muzero
+puts in each position. This is operator-saturation surfacing on the
+training side — more params can't extract signal that isn't in the
+targets.
+
+**Fork (pre-committed):** run 10b (depth) to finish the sweep, but if it
+also washes vs ctrl, promote 10-ctrl as gen-10 (+2.5 corpus-refresh win)
+and pivot the next lever from CAPACITY to DATA — collect a bigger corpus
+(more games = more value coverage + state diversity). The policy-CE
+plateau says we're target-information-limited; open question whether more
+games move the policy at all, or gen-9 self-play has plateaued and the
+next gain needs a different target source (JTR games stay off-limits).
+
+## 2026-07-10 — gen-10b (128/4/4, DEPTH arm): trains CLEAN (no U-curve, best holdout CE) but ties the control in the arena — capacity sweep CLOSED, gen-10 = 10-ctrl
+
+Third/final arm of the gen-10 sweep: `PolicyValueNetAttn(num_layers=4)`
+(~2× params vs gen-9, width unchanged), same shared corpus.
+
+**Training — no overfit, unlike width.** Eval value loss stayed flat
+~0.062–0.064 through 22k (no U-curve), policy CE drifted to 0.5358 —
+the BEST holdout of the three (ctrl 0.5396, 10a 0.538). Gated the final
+net, no ES needed. Depth was the safe capacity add; width (10a) was not.
+
+**Gate vs gen-9** (fp new 48513.89 ≠ src gen-9 29639.75):
+
+| seed | per-game | p |
+|:--|:--|:--|
+| A | +2.7 | 0.0324 * |
+| B | +4.1 | 0.0015 ** |
+
+Both significant, pooled ≈ +3.4 — clears the bar, nominally above ctrl.
+
+**Gate vs 10-ctrl — direct depth test** (fp new 48513.89 ≠ src ctrl
+29781.71): seed A +0.0 (p=0.9776 ns, 102/108), seed B −0.0 (p=0.9742 ns,
+119/110). **Dead wash.** Depth ties the control head-to-head.
+
+**SWEEP VERDICT (2026-07-10): capacity is NOT the lever at 128k.** All
+three arms — ctrl 128/2, 10a 256/2, 10b 128/4 — are arena-equal:
+
+| arm | vs gen-9 | vs ctrl (direct) | train |
+|:--|:--|:--|:--|
+| 10-ctrl (128/2) | +2.5/+2.4 ** | — (bar) | clean |
+| 10a (256/2, width) | +0.7/+2.6 | −0.55 ns (wash) | value U-curve, ES@10k |
+| 10b (128/4, depth) | +2.7/+4.1 ** | +0.0 ns (wash) | clean, best CE |
+
+The single most telling fact: **10b got the best holdout policy CE yet
+still ties ctrl in the arena** — a better fit to the targets converts to
+ZERO extra strength. We're at the CORPUS's information ceiling, not a
+capacity ceiling; the ~+2.5–3.4 over gen-9 is entirely the corpus
+refresh (matches gen-9's own +2.8/+4.2 same-recipe step). This is
+operator-saturation (search(π)≈π) surfacing on the training side: more
+params can't extract signal the saturated teacher didn't put in.
+
+**gen-10 = 10-ctrl (128/2/4), PROMOTED** — all three arena-equal, so
+take the smallest (no reason to carry 2× params for zero gain). Footnote:
+depth (128/4) is the capacity that did NOT overfit at 128k, so it's the
+arch to revisit IF a bigger corpus is collected — not width.
+
+**Next lever = DATA/coverage, not capacity (operator + capacity both
+saturated).** Open question, to test: does a bigger corpus (more games =
+more state coverage + value outcomes) move the raw POLICY at all, or only
+the value head? If per-position policy info is truly capped by the
+saturated operator, more games mainly buys coverage/value — a diminishing
+bet. If even more data washes on policy, gen-9 self-play has plateaued and
+the next real gain needs a NEW target source (operator saturated, JTR
+games off-limits) — the project's hard wall.

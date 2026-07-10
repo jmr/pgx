@@ -9,7 +9,58 @@ markers as work completes. **Dated experiment results and diagnostics live in
 `docs/jass_experiment_log.md`** (append new results there; this file keeps
 conclusions and pointers). The per-generation procedure is `docs/jass_sop.md`.
 
-## Status snapshot (2026-07-06)
+## Status snapshot (2026-07-10)
+
+**CHAMPION: gen-10 (= 10-ctrl, `PolicyValueNetAttn` 128/2/4 on the
+fresh gen-9 corpus) — PROMOTED 2026-07-10, raw +2.5/+2.4 vs gen-9,
+both seeds significant (p=0.0381 / 0.0293).** A modest corpus-refresh
+step, same recipe/size/arch as gen-9 — only the generator advanced.
+
+**CAPACITY SWEEP CLOSED (2026-07-10, log): capacity is NOT the lever
+at 128k corpus — both axes wash vs the 128/2 control.** Three arms on
+one shared corpus: ctrl (128/2), 10a (256/2, width), 10b (128/4,
+depth). Direct head-to-heads vs ctrl: 10a −0.55 ns, 10b +0.0 ns —
+all three arena-equal. Width re-opened the value U-curve (ES@10k);
+depth trained clean and even got the BEST holdout policy CE (0.5358 <
+ctrl 0.5396) — yet still TIES ctrl in play. A better fit to the
+targets converts to zero extra strength → we are at the CORPUS's
+information ceiling, not a capacity ceiling. This is operator
+saturation (search(π)≈π) surfacing on the training side: more params
+can't extract signal the saturated teacher didn't put in. The
+gen-9→10 gain is entirely the corpus refresh. gen-10 = the SMALLEST
+arm (parsimony).
+
+**The two capacity washes are NOT equivalent — one is confounded
+(important for what gen-11 tests):** the sweep ran on a **64k** corpus
+(`32×2048`, HALF the ~128k the sweep design targeted). At 64k, ctrl
+(128/2) and depth (128/4) both trained CLEAN (no overfit) and washed —
+so **depth is settled: well-fed capacity that didn't pay.** But width
+(256/2) **overfit** (value U-curve, ES@10k) — a 256-wide net is
+data-hungry and 64k starved it, so its wash is **DATA-CONFOUNDED**, not
+clean evidence. We cannot conclude width is dead; only that it's dead
+*when starved*. And ctrl trained clean at 64k too → ctrl isn't
+data-starved → more data likely won't move *ctrl* much; the value of
+more data is specifically to FEED the capacity that was starved.
+
+**NEXT (2026-07-10): gen-11 = the DATA round that resolves the width
+confound.** Collect a bigger corpus (~128k, `64×2048`) from the gen-10
+generator; slice it for a free dose-response (collect once, train on
+subsets):
+1. **128/2 on the 64k subset** (`batches[:32]`) — refresh-only control.
+2. **128/2 on full 128k** — does coverage help ctrl? (expect little —
+   it wasn't starved).
+3. **256/2 on full 128k** — THE test: does width stop overfitting and
+   finally pay once fed?
+Gate the head-to-heads. **Fork:** 256/2 beats 128/2 → capacity was
+DATA-blocked, scale data+width together (escape from the flat
+corpus-refresh found). 256/2 still washes well-fed → capacity is
+genuinely dead, the ~+2.5/gen corpus refresh is the only lever → gen-9
+self-play has PLATEAUED and the next gain needs a NEW target source
+(operator saturated; JTR games off-limits). Depth is dropped (answered).
+(Superseded: the 2026-07-07 "B-capacity scaling" NEXT — the sweep ran
+it; width's arm is the one worth re-running with more data.)
+
+## Superseded snapshot (2026-07-06)
 
 **CHAMPION: gen-9 (`pv_gen9_s128.msgpack`) — PROMOTED 2026-07-06,
 raw +2.8/+4.2 vs gen-8d_mz, both seeds significant (t p=0.0211 /

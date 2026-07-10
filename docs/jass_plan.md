@@ -42,21 +42,32 @@ clean evidence. We cannot conclude width is dead; only that it's dead
 data-starved → more data likely won't move *ctrl* much; the value of
 more data is specifically to FEED the capacity that was starved.
 
-**NEXT (2026-07-10): gen-11 = the DATA round that resolves the width
-confound.** Collect a bigger corpus (~128k, `64×2048`) from the gen-10
-generator; slice it for a free dose-response (collect once, train on
-subsets):
-1. **128/2 on the 64k subset** (`batches[:32]`) — refresh-only control.
-2. **128/2 on full 128k** — does coverage help ctrl? (expect little —
-   it wasn't starved).
-3. **256/2 on full 128k** — THE test: does width stop overfitting and
-   finally pay once fed?
-Gate the head-to-heads. **Fork:** 256/2 beats 128/2 → capacity was
-DATA-blocked, scale data+width together (escape from the flat
-corpus-refresh found). 256/2 still washes well-fed → capacity is
-genuinely dead, the ~+2.5/gen corpus refresh is the only lever → gen-9
-self-play has PLATEAUED and the next gain needs a NEW target source
-(operator saturated; JTR games off-limits). Depth is dropped (answered).
+**NEXT (2026-07-10): gen10c = the DATA round that resolves the width
+confound (NOT yet gen-11).** Cheapest controlled test: EXTEND the
+existing 32×2048 gen-9 corpus to **64×2048 (~128k)** by collecting 32
+MORE batches from the SAME generator (**gen-9**, `pv_gen9_s128.msgpack`)
+— mixing in gen-10 games would confound the corpus, and paying only the
+delta is ~half a fresh collect. Stays on the gen-9 generator on purpose:
+the gen-9→10 upgrade is only +2.5, noise vs the width question. (This
+redefines the label `10c` — originally the abandoned 256/4/8 combine,
+never ran; now the 128k re-feed. gen-10 family = gen-9-generated corpus,
+so 10c belongs to it; **gen-11 stays reserved for the gen-10-generated
+corpus**, only after width proves out.) Two arms on the 128k corpus:
+1. **gen10c_ctrl = 128/2 on full 128k** — the head-to-head baseline AND
+   the coverage test vs 10-ctrl (128/2 @64k; expect little — ctrl wasn't
+   starved). The 64k control is already 10-ctrl (its corpus is
+   `batches[:32]` of the 128k — no retrain).
+2. **gen10c = 256/2 on full 128k** — THE test: does width stop
+   overfitting and finally pay once fed? (Watch the value U-curve; ES if
+   it still bends.)
+Decisive gate: **gen10c vs gen10c_ctrl** (256/2 vs 128/2, both @128k).
+**Fork:** width beats depth-1 → capacity was DATA-blocked, scale
+data+width together (escape from the flat corpus-refresh found), THEN do
+a real gen-11 from the gen-10 generator. Still a wash well-fed →
+capacity is genuinely dead, the ~+2.5/gen corpus refresh is the only
+lever → gen-9 self-play has PLATEAUED and the next gain needs a NEW
+target source (operator saturated; JTR games off-limits). Depth is
+dropped (answered at 64k, well-fed).
 (Superseded: the 2026-07-07 "B-capacity scaling" NEXT — the sweep ran
 it; width's arm is the one worth re-running with more data.)
 

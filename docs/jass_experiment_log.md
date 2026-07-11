@@ -2418,3 +2418,48 @@ saturated operator, more games mainly buys coverage/value — a diminishing
 bet. If even more data washes on policy, gen-9 self-play has plateaued and
 the next real gain needs a NEW target source (operator saturated, JTR
 games off-limits) — the project's hard wall.
+
+## 2026-07-11 — gen10c (128k width re-feed): capacity is DEAD — well-fed 256/2 STILL washes vs 128/2 despite the best holdout CE of the sweep; gen-9 self-play has PLATEAUED
+
+Resolves the sweep's one open confound (width's 64k wash was
+data-starvation). Extended the existing 32×2048 gen-9 corpus to
+**64×2048 (~128k)** by collecting 32 more batches from the SAME
+generator (gen-9) — data is the only variable vs the sweep. Still the
+gen-10 family (gen-9-generated); NOT gen-11. Two arms trained on 128k.
+
+**Arm 1 — 10c_ctrl (128/2 @128k), the coverage control.** Trained
+clean (no U-curve). Gates:
+- vs gen-9: +1.7 ns (p=0.1402) / +2.8 * (p=0.0296) — ~the usual +2.5
+  corpus step.
+- vs 10-ctrl (128/2 @**64k**): +0.1 / −1.1, both ns → **more data does
+  NOTHING for the small net.** ctrl wasn't starved; coverage alone can't
+  move it. (holdout v floors ~0.0686 on the 128k batch — don't compare
+  across corpus sizes.)
+
+**Arm 2 — 10c (256/2 @128k), THE test.** Value U-curve MILDER than at
+64k but not gone: U-min pushed 8k→~13k, floor 0.0665, overfit climb only
++0.005 by 24k (vs 10a's +0.017 at 64k) — starvation partially relieved,
+256-wide still somewhat data-hungry. Took `_es` at ~13k. **Best holdout
+policy CE of the entire sweep: ~0.5352** (128/2 @128k 0.5396; width @64k
+0.538) — the first arm where width fits the policy targets measurably
+better than the small net. Gates:
+- vs gen-9: +2.2 ns (p=0.1103) / +2.8 * (p=0.0155).
+- **vs 10c_ctrl (128/2 @128k) — DECISIVE:** +0.7 (p=0.5228) / −0.0
+  (p=0.9914, 300/300), pooled ≈ +0.35 **dead wash.**
+
+**VERDICT: capacity is dead; the plateau is real.** Width well-fed at
+128k, with the best CE in the sweep, converts to ZERO arena strength —
+the THIRD straight "better holdout CE fails to convert" (10b depth; 10c
+width-fed; + coverage washed). Both live escape hypotheses — "width was
+just starved" and "more data helps" — are killed by this round. We are
+at the CORPUS's information ceiling: gen-9+muzero puts a fixed amount of
+playing strength into each target, 128/2 already extracts all of it, and
+neither more params nor more games adds anything. gen-9 self-play has
+PLATEAUED; the ~+2.5/gen corpus refresh just reshuffles the same info.
+
+Honest caveat: width-vs-narrow drifted −0.55 (@64k) → +0.35 (@128k) as
+data doubled — a faint nudge for width, but both ns, inside the noise;
+after three CE-doesn't-convert results, not worth a 256k collect to
+chase. **No champion change: gen-10 = 10-ctrl** (all three 128k nets
+arena-equal to it). Next gain requires a NEW TARGET SOURCE, not more
+self-play scale — see plan NEXT.

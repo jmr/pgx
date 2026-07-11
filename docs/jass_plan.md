@@ -9,67 +9,60 @@ markers as work completes. **Dated experiment results and diagnostics live in
 `docs/jass_experiment_log.md`** (append new results there; this file keeps
 conclusions and pointers). The per-generation procedure is `docs/jass_sop.md`.
 
-## Status snapshot (2026-07-10)
+## Status snapshot (2026-07-11)
 
 **CHAMPION: gen-10 (= 10-ctrl, `PolicyValueNetAttn` 128/2/4 on the
 fresh gen-9 corpus) — PROMOTED 2026-07-10, raw +2.5/+2.4 vs gen-9,
 both seeds significant (p=0.0381 / 0.0293).** A modest corpus-refresh
 step, same recipe/size/arch as gen-9 — only the generator advanced.
 
-**CAPACITY SWEEP CLOSED (2026-07-10, log): capacity is NOT the lever
-at 128k corpus — both axes wash vs the 128/2 control.** Three arms on
-one shared corpus: ctrl (128/2), 10a (256/2, width), 10b (128/4,
-depth). Direct head-to-heads vs ctrl: 10a −0.55 ns, 10b +0.0 ns —
-all three arena-equal. Width re-opened the value U-curve (ES@10k);
-depth trained clean and even got the BEST holdout policy CE (0.5358 <
-ctrl 0.5396) — yet still TIES ctrl in play. A better fit to the
-targets converts to zero extra strength → we are at the CORPUS's
-information ceiling, not a capacity ceiling. This is operator
-saturation (search(π)≈π) surfacing on the training side: more params
-can't extract signal the saturated teacher didn't put in. The
-gen-9→10 gain is entirely the corpus refresh. gen-10 = the SMALLEST
-arm (parsimony).
+**CAPACITY IS DEAD — gen-9 self-play has PLATEAUED (confirmed
+2026-07-11, log).** Full arc: a 3-arm sweep at 64k (ctrl 128/2, 10a
+256/2, 10b 128/4) + the gen10c 128k re-feed (10c_ctrl 128/2, 10c
+256/2). Every capacity/data lever washes vs the 128/2 control:
+- depth (10b, 64k, clean): +0.0 ns vs ctrl;
+- width @64k (10a): overfit → −0.55 ns (was data-confounded);
+- width @128k, well-fed (10c): +0.35 ns — confound RESOLVED, still a
+  wash, despite the BEST holdout policy CE of the sweep (0.5352);
+- coverage (128/2 @128k vs @64k): wash — more data does nothing for the
+  small net.
 
-**The two capacity washes are NOT equivalent — one is confounded
-(important for what gen-11 tests):** the sweep ran on a **64k** corpus
-(`32×2048`, HALF the ~128k the sweep design targeted). At 64k, ctrl
-(128/2) and depth (128/4) both trained CLEAN (no overfit) and washed —
-so **depth is settled: well-fed capacity that didn't pay.** But width
-(256/2) **overfit** (value U-curve, ES@10k) — a 256-wide net is
-data-hungry and 64k starved it, so its wash is **DATA-CONFOUNDED**, not
-clean evidence. We cannot conclude width is dead; only that it's dead
-*when starved*. And ctrl trained clean at 64k too → ctrl isn't
-data-starved → more data likely won't move *ctrl* much; the value of
-more data is specifically to FEED the capacity that was starved.
+Three straight times a measurably better holdout CE converts to ZERO
+arena strength. We are at the CORPUS's information ceiling: gen-9+muzero
+puts a fixed amount of playing strength into each target, 128/2 already
+extracts all of it, and neither more params nor more games adds
+anything — operator saturation (search(π)≈π) surfacing on the training
+side. The ~+2.5/gen corpus refresh just reshuffles the same
+information. gen-10 = 10-ctrl stands (all nets arena-equal; parsimony).
 
-**NEXT (2026-07-10): gen10c = the DATA round that resolves the width
-confound (NOT yet gen-11).** Cheapest controlled test: EXTEND the
-existing 32×2048 gen-9 corpus to **64×2048 (~128k)** by collecting 32
-MORE batches from the SAME generator (**gen-9**, `pv_gen9_s128.msgpack`)
-— mixing in gen-10 games would confound the corpus, and paying only the
-delta is ~half a fresh collect. Stays on the gen-9 generator on purpose:
-the gen-9→10 upgrade is only +2.5, noise vs the width question. (This
-redefines the label `10c` — originally the abandoned 256/4/8 combine,
-never ran; now the 128k re-feed. gen-10 family = gen-9-generated corpus,
-so 10c belongs to it; **gen-11 stays reserved for the gen-10-generated
-corpus**, only after width proves out.) Two arms on the 128k corpus:
-1. **gen10c_ctrl = 128/2 on full 128k** — the head-to-head baseline AND
-   the coverage test vs 10-ctrl (128/2 @64k; expect little — ctrl wasn't
-   starved). The 64k control is already 10-ctrl (its corpus is
-   `batches[:32]` of the 128k — no retrain).
-2. **gen10c = 256/2 on full 128k** — THE test: does width stop
-   overfitting and finally pay once fed? (Watch the value U-curve; ES if
-   it still bends.)
-Decisive gate: **gen10c vs gen10c_ctrl** (256/2 vs 128/2, both @128k).
-**Fork:** width beats depth-1 → capacity was DATA-blocked, scale
-data+width together (escape from the flat corpus-refresh found), THEN do
-a real gen-11 from the gen-10 generator. Still a wash well-fed →
-capacity is genuinely dead, the ~+2.5/gen corpus refresh is the only
-lever → gen-9 self-play has PLATEAUED and the next gain needs a NEW
-target source (operator saturated; JTR games off-limits). Depth is
-dropped (answered at 64k, well-fed).
-(Superseded: the 2026-07-07 "B-capacity scaling" NEXT — the sweep ran
-it; width's arm is the one worth re-running with more data.)
+**NEXT (2026-07-11): the lever is a NEW TARGET SOURCE, not more
+self-play scale — a strategic pivot.** Every within-self-play lever is
+exhausted (operator saturated, capacity dead, coverage dead). Under the
+standing constraints — JTR games off-limits (Step 4b);
+determinization/card-assignment a documented NOT-retry negative — the
+only way to raise strength is to put richer information into the targets
+than gen-9+muzero self-play can produce. Candidate directions, ~ordered
+by how clean the "new information" argument is (TO BE CHOSEN by design
+discussion, not yet committed):
+1. **Exact endgame targets (strongest candidate).** Late in a hand (few
+   cards left) the determinized subgame is small enough to SOLVE
+   exactly. Exact endgame values/policies are genuinely richer than the
+   net's own bootstrapped value — information the saturated operator
+   cannot manufacture — feeding the value head (and late-trick policy) a
+   non-self-referential signal.
+2. **Exploration / state-space coverage.** Self-play is near-greedy;
+   higher-τ or opponent-diversified self-play could surface informative
+   positions the policy avoids — enriches the target DISTRIBUTION rather
+   than per-position richness. Cheaper to try than (1).
+3. **A different-CLASS improvement operator** (not determinized PUCT).
+   Lower odds — this operator class is the one shown saturated — but a
+   fundamentally different search (solver-backed, opponent-modeling) is
+   not ruled out.
+
+Measurement is unchanged: gate raw-vs-raw vs gen-10; margin vs POWERFUL
+(net trump on) as the external yardstick. (Superseded: the 2026-07-07
+"B-capacity scaling" NEXT and the 2026-07-10 gen10c diagnostic — both
+ran; capacity is dead.)
 
 ## Superseded snapshot (2026-07-06)
 

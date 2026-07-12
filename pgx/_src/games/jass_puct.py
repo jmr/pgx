@@ -205,7 +205,10 @@ def puct_search(
     prior_mix_uniform: float = 0.0,
     rollout_value_weight: float = 0.0,
     readout: str = "visits",
-) -> tuple[Array, Array]:
+    *,
+    cheat: bool = False,
+    return_visits: bool = False,
+) -> tuple[Array, ...]:
     """Run K determinized tree searches and aggregate the K roots.
 
     Args:
@@ -249,6 +252,13 @@ def puct_search(
             ~uniform and the visit readout picks near-noise (measured:
             classical λ=1/w=1 read by visits = −24.3 vs gen-9 raw,
             2026-07-06; see `_qsum_scores` for why mean, not sum).
+        cheat: All K "determinizations" are the TRUE state (no hand
+            resampling) — the internal analogue of JTR's `--cheating`.
+            Diagnostic only (oracle probes, search-noise floors); not a
+            fair player and not a collector.
+        return_visits: Also return the per-tree root visit counts
+            (K, 43) BEFORE aggregation — the per-world teacher signal
+            (hands-conditional-targets probe, log 2026-07-12).
 
     Returns:
         (scores, legal): (43,) float32 aggregated root scores and the
@@ -256,14 +266,21 @@ def puct_search(
         summed visit counts, zero on illegal actions. readout="qsum":
         visit-weighted mean Q in points, −inf on actions that are
         illegal or unvisited in every tree (argmax-safe as-is).
+        With return_visits=True: (scores, legal, visits) with visits
+        (K, 43) int32 per-tree root visit counts.
     """
     if readout not in ("visits", "qsum"):
         raise ValueError(f"unknown readout: {readout!r}")
     K = num_determinizations
     det_key, search_key, root_key = jax.random.split(key, 3)
-    det_states = jax.vmap(
-        lambda k: sample_determinization(state, player_id, k)
-    )(jax.random.split(det_key, K))                      # (K,) GameState
+    if cheat:
+        det_states = jax.tree_util.tree_map(
+            lambda x: jnp.broadcast_to(x[None], (K, *x.shape)), state
+        )                                                # (K,) true state
+    else:
+        det_states = jax.vmap(
+            lambda k: sample_determinization(state, player_id, k)
+        )(jax.random.split(det_key, K))                  # (K,) GameState
 
     logits, value, _ = _pv_eval(
         pv_apply, pv_params, det_states, v_scale,
@@ -311,6 +328,8 @@ def puct_search(
     else:  # "qsum" — qvalues are root-mover perspective in all K trees;
         # unvisited children hold Q=0, so N·Q weighting ignores them.
         scores = _qsum_scores(visits, summary.qvalues, legal)
+    if return_visits:
+        return scores, legal, visits
     return scores, legal
 
 

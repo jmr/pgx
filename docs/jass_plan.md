@@ -35,29 +35,50 @@ anything — operator saturation (search(π)≈π) surfacing on the training
 side. The ~+2.5/gen corpus refresh just reshuffles the same
 information. gen-10 = 10-ctrl stands (all nets arena-equal; parsimony).
 
-**NEXT (2026-07-11): the lever is a NEW TARGET SOURCE, not more
-self-play scale — a strategic pivot.** Every within-self-play lever is
-exhausted (operator saturated, capacity dead, coverage dead). Under the
-standing constraints — JTR games off-limits (Step 4b);
+**NEXT (2026-07-12, revised): the lever is a NEW TARGET SOURCE, not
+more self-play scale — a strategic pivot.** Every within-self-play
+lever is exhausted (operator saturated, capacity dead, coverage dead).
+Under the standing constraints — JTR games off-limits (Step 4b);
 determinization/card-assignment a documented NOT-retry negative — the
 only way to raise strength is to put richer information into the targets
-than gen-9+muzero self-play can produce. Candidate directions, ~ordered
-by how clean the "new information" argument is (TO BE CHOSEN by design
-discussion, not yet committed):
-1. **Exact endgame targets (strongest candidate).** Late in a hand (few
-   cards left) the determinized subgame is small enough to SOLVE
-   exactly. Exact endgame values/policies are genuinely richer than the
-   net's own bootstrapped value — information the saturated operator
-   cannot manufacture — feeding the value head (and late-trick policy) a
-   non-self-referential signal.
-2. **Exploration / state-space coverage.** Self-play is near-greedy;
+than gen-9+muzero self-play can produce. Candidate directions (TO BE
+CHOSEN by design discussion, not yet committed):
+1. **Hands-conditional policy targets (NEW 2026-07-12 — leading cheap
+   candidate).** The hidden-hand sensitivity probe
+   (`scripts/jass_hidden_hand_probe.py`, log 2026-07-12) showed the
+   policy head is hands-BLIND (KL 0.003 across resampled worlds) while
+   the value head is hands-AWARE (±28 pts) — and the blindness is
+   trained in: the aggregated-visits target is info-set-marginal by
+   construction, so summing the K=16 per-world visit distributions
+   throws away the hands-conditional information the pipeline already
+   computes. Fix the target pairing (per-world visits ↔ per-world
+   features), same collection compute. Full pre-registered gate design
+   in the log entry; kill switch = the cheap teacher-signal pre-probe
+   (do the 16 trees actually disagree across worlds?). Predicts the
+   operator RE-OPENS on the student.
+2. **Exact endgame targets (strongest "new information" argument).**
+   Late in a hand (few cards left) the determinized subgame is small
+   enough to SOLVE exactly. Exact endgame values/policies are genuinely
+   richer than the net's own bootstrapped value — information the
+   saturated operator cannot manufacture — feeding the value head (and
+   late-trick policy) a non-self-referential signal. Synergy with (1):
+   solved endgame policies are hands-conditional by nature.
+3. **Exploration / state-space coverage.** Self-play is near-greedy;
    higher-τ or opponent-diversified self-play could surface informative
    positions the policy avoids — enriches the target DISTRIBUTION rather
-   than per-position richness. Cheaper to try than (1).
-3. **A different-CLASS improvement operator** (not determinized PUCT).
+   than per-position richness. Downgraded 2026-07-11: the gen10c
+   coverage control (128k vs 64k wash) is mild evidence against pure
+   coverage.
+4. **A different-CLASS improvement operator** (not determinized PUCT).
    Lower odds — this operator class is the one shown saturated — but a
    fundamentally different search (solver-backed, opponent-modeling) is
    not ruled out.
+
+Oracle context for (1) (log 2026-07-12): gen-9 cheating-raw vs
+fair-raw in JTR = dead wash (−0.5/game ns, 101/250 exact-tie pairs) —
+perfect information is worth ZERO to the current raw policy, exactly
+as the trained-in blindness predicts. Cheating-PUCT vs fair-PUCT (the
+search-side oracle bound, never previously run) is in flight.
 
 Measurement is unchanged: gate raw-vs-raw vs gen-10; margin vs POWERFUL
 (net trump on) as the external yardstick. (Superseded: the 2026-07-07

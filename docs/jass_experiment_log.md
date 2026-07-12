@@ -2657,3 +2657,39 @@ mechanism: hands-conditional targets fix the prior INSIDE each world
 (plan NEXT #1); belief-weighted determinization fixes WHICH worlds are
 searched; exact endgame targets strengthen the value head that cashes
 both. gen-10's JTR export + external re-calibration remain pending.
+
+## 2026-07-12 — Teacher-signal pre-probe: across-world JSD 0.24 vs a 0.0000 same-world floor — the KILL SWITCH DOES NOT FIRE; the aggregation step discards ~35% of the target's entropy
+
+Gate step 1 of hands-conditional policy targets (pre-registered
+above), run same-day. Script: `scripts/jass_teacher_signal_probe.py`;
+enabled by two new diagnostic knobs on `puct_search` (`cheat=True` —
+all K worlds = the true state, the internal analogue of JTR's
+`--cheating`; `return_visits=True` — per-tree root visits before
+aggregation). 24 on-policy games played BY the standing teacher
+itself (gen-9, muzero K=16×64, pb_c=1.25, dirichlet 0, τ=1 visit
+sampling — collection-faithful), 645 card-play decisions with >1
+legal move:
+
+| metric | value |
+|:--|:--|
+| across-world JSD of the 16 root visit distributions | **0.241** mean (median 0.259, p90 0.438) |
+| same-world floor (cheat=True, search-noise control) | **0.0000** — teacher is deterministic; ALL disagreement is world-driven |
+| JSD / H(aggregate): share of the target's entropy that is across-world variation | **35%** |
+| worlds whose visit argmax ≠ the aggregate argmax | **25.4%** |
+
+Flat ~0.23–0.29 JSD across tricks 0–6 (dips to 0.16 at trick 7 as
+worlds collapse). **In a quarter of sampled worlds, the per-world
+search's top move is NOT the move the aggregated target teaches** —
+and the marginal target actively averages those world-specific
+recommendations away.
+
+The full quantitative chain for hands-conditional targets now reads:
+teacher knows hands-conditional play at JSD ≈ 0.24/position →
+aggregation discards it → trained net retains KL ≈ 0.003 across
+worlds (hidden-hand probe, ~80× less) → cheating-raw worth zero,
+while the oracle pool sits at +12.6/game on the search path.
+**Gate step 1 PASSED; step 2 (per-world collection rows) is GO
+whenever we choose to spend it.** Runtime note: 24 games ≈ 5 min on
+the local CPU — the probe re-runs cheaply on any future student
+(mechanism check = its policy KL moving toward this JSD, not to it —
+some across-world variance is value-driven, not prior-learnable).

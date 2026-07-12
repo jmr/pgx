@@ -38,11 +38,12 @@ information. gen-10 = 10-ctrl stands (all nets arena-equal; parsimony).
 **NEXT (2026-07-12, revised): the lever is a NEW TARGET SOURCE, not
 more self-play scale — a strategic pivot.** Every within-self-play
 lever is exhausted (operator saturated, capacity dead, coverage dead).
-Under the standing constraints — JTR games off-limits (Step 4b);
-determinization/card-assignment a documented NOT-retry negative — the
-only way to raise strength is to put richer information into the targets
-than gen-9+muzero self-play can produce. Candidate directions (TO BE
-CHOSEN by design discussion, not yet committed):
+Under the standing constraints — JTR games off-limits (Step 4b); the
+determinization/card-assignment NOT-retry now RE-SCOPED to the
+raw-input path only (log 2026-07-12: cheating-PUCT +12.6*** overturns
+it for the search path) — the levers are richer TARGET information
+and better WORLD selection for the searcher. Candidate directions (TO
+BE CHOSEN by design discussion, not yet committed):
 1. **Hands-conditional policy targets (NEW 2026-07-12 — leading cheap
    candidate).** The hidden-hand sensitivity probe
    (`scripts/jass_hidden_hand_probe.py`, log 2026-07-12) showed the
@@ -56,29 +57,46 @@ CHOSEN by design discussion, not yet committed):
    in the log entry; kill switch = the cheap teacher-signal pre-probe
    (do the 16 trees actually disagree across worlds?). Predicts the
    operator RE-OPENS on the student.
-2. **Exact endgame targets (strongest "new information" argument).**
+2. **Belief-weighted determinization (NEW 2026-07-12 — largest
+   measured headroom).** The oracle bound: cheating-PUCT beats
+   fair-PUCT **+12.6/game*** (t=11.3)** where cheating-raw is a dead
+   wash — hidden-hand info is cashed through SEARCH (tree on true
+   holdings + the hands-aware value head), and fair search spreads
+   its budget over mostly-wrong worlds. A learned belief model over
+   hidden hands (predict card locations from bidding/play history;
+   sample/weight determinizations by it) harvests part of that pool.
+   First step is NOT a model: the pre-registered oracle-mixture
+   dose-response (log 2026-07-12) — replace q of 45 worlds with the
+   true deal, map belief quality → points, and learn how much of
+   +12.6 is world quality vs compute concentration. Supersedes the
+   blanket NOT-retry (re-scoped: thesis-era CardsEstimator had no
+   hands-aware evaluator to convert world quality into points).
+3. **Exact endgame targets (strongest "new information" argument).**
    Late in a hand (few cards left) the determinized subgame is small
    enough to SOLVE exactly. Exact endgame values/policies are genuinely
    richer than the net's own bootstrapped value — information the
    saturated operator cannot manufacture — feeding the value head (and
    late-trick policy) a non-self-referential signal. Synergy with (1):
    solved endgame policies are hands-conditional by nature.
-3. **Exploration / state-space coverage.** Self-play is near-greedy;
+4. **Exploration / state-space coverage.** Self-play is near-greedy;
    higher-τ or opponent-diversified self-play could surface informative
    positions the policy avoids — enriches the target DISTRIBUTION rather
    than per-position richness. Downgraded 2026-07-11: the gen10c
    coverage control (128k vs 64k wash) is mild evidence against pure
    coverage.
-4. **A different-CLASS improvement operator** (not determinized PUCT).
+5. **A different-CLASS improvement operator** (not determinized PUCT).
    Lower odds — this operator class is the one shown saturated — but a
    fundamentally different search (solver-backed, opponent-modeling) is
    not ruled out.
 
-Oracle context for (1) (log 2026-07-12): gen-9 cheating-raw vs
-fair-raw in JTR = dead wash (−0.5/game ns, 101/250 exact-tie pairs) —
-perfect information is worth ZERO to the current raw policy, exactly
-as the trained-in blindness predicts. Cheating-PUCT vs fair-PUCT (the
-search-side oracle bound, never previously run) is in flight.
+Oracle context for (1)/(2) (log 2026-07-12, gen-9, JTR, same day/
+harness): cheating-raw vs fair-raw = dead wash (−0.5/game ns, 101/250
+exact-tie pairs) — perfect information is worth ZERO to the raw
+policy, exactly as the trained-in blindness predicts; cheating-PUCT
+vs fair-PUCT = **+12.6/game*** — worth ~2.5× the whole POWERFUL
+margin to the search. (1), (2) and (3) are complementary: (1) fixes
+the prior inside each world, (2) fixes which worlds are searched,
+(3) strengthens the value head that cashes both.
 
 Measurement is unchanged: gate raw-vs-raw vs gen-10; margin vs POWERFUL
 (net trump on) as the external yardstick. (Superseded: the 2026-07-07
@@ -503,6 +521,11 @@ own analysis identifies as the real levers — are:
 - ISMCTS substrate vs determinized MCTS: ISMCTS underperformed.
 - Learned card-belief models for determinization sampling (CardsEstimator,
   auto-regressive variants): no signal vs uniform sampling.
+  **RE-SCOPED 2026-07-12** (log): that result was measured on a
+  rollout-leaf searcher with no hands-aware evaluator; with the pgx
+  value head (±28-pt hand sensitivity) the oracle bound is
+  cheating-PUCT +12.6/game*** — the direction is OPEN again for the
+  search path (still dead for raw-input marginalization).
 - UCB exploration-constant tuning: wash, because of Q-sum aggregation (above).
 - Further flat-rollout K/N tuning in this repo: our own sweep showed K≥8 is
   indistinguishable; rollout quality, not K or N, is the bottleneck.

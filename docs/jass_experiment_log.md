@@ -2587,3 +2587,73 @@ Gate design (pre-registered, decision order):
    Fork: (a) fails → fix pairing. (a) passes but (b)+(c) wash →
    hands-conditional info doesn't convert; direction dead, exact
    endgame targets next. (c) re-opens → iterate the crank.
+
+## 2026-07-12 — Cheating-PUCT vs fair-PUCT: +12.6/game*** — hidden-hand info is worth ZERO to the raw policy but +12.6 to the SEARCH; the imperfect-info pool is WIDE OPEN and the belief-model NOT-retry is re-scoped
+
+The Arm-B companion to today's cheating-raw re-run — the arm never
+run before (2026-07-05 probed cheating-RAW only). gen-9 cheating-PUCT
+(all 45 "determinizations" = the true deal) vs gen-9 fair-PUCT
+(uniform void-aware worlds), JTR in-process arena (commit 01ce4f1),
+both sides `SWEEP_64` real PUCT (`--pgx-policy`), `--cheating1`,
+250 pairs / 500 games, seed 42, rule-based trump both sides:
+
+**+25.2/pair (+12.6/game), sd 35.2, t=11.302, p<0.0001; sign
+161W–38L–51T (cheat scored 117.4% of fair's points).**
+
+**The oracle dissociation, complete (same net, same day, same
+harness):**
+
+| path | Δ(perfect info − fair) | verdict |
+|:--|:--|:--|
+| raw (one forward pass) | −0.5/game, p=0.62 | worth ZERO |
+| PUCT @ SWEEP_64 | **+12.6/game, p<0.0001** | worth more than the whole POWERFUL margin (+5.05) |
+
+Mechanism (matches the sensitivity probe): hidden-hand information is
+cashed through PLANNING — the tree simulates the opponents' actual
+holdings and the hands-AWARE value head (±28 pts world-sensitivity)
+evaluates true continuations. The hands-blind policy head cannot use
+the same information in one shot, and was trained not to.
+
+**Honest decomposition — +12.6 is the ORACLE bound, not the belief
+payoff.** The gap bundles: (a) world QUALITY (searching the right
+world); (b) aggregation losses of fair play (visits summed across 45
+worlds — strategy-fusion-type averaging); (c) compute concentration
+(45 trees on ONE world ≈ a deeper effective search on the relevant
+world). A realistic belief model harvests only part of (a). The bound
+being ~2.5× the entire POWERFUL margin still makes this the largest
+measured headroom anywhere in the project right now.
+
+**Saturation narrative REVISED:** the determinized-PUCT operator is
+saturated on INFO-SET-DERIVABLE information (teacher-budget sweep
+flat, JTR margin +1.5 ns, capacity dead — all still true). But a
++12.6/game pool sits in hidden-information quality that neither more
+sims nor more params can reach, because fair search spreads its budget
+over mostly-wrong worlds. Everything washes EXCEPT knowing where the
+cards are.
+
+**The NOT-retry is RE-SCOPED, not violated.** The 2026-07-07 "both
+facts kill it" verdict on learned determinization sampling rested on:
+(1) "JTR's own cheating probe ruled out determinization noise" — that
+probe was cheating-RAW; it binds the raw-input path only, and today's
+Arm B directly overturns it for the search path. (2) The thesis-era
+CardsEstimator/AR no-signal (≥1000 games) — measured on a
+rollout-leaf searcher with NO hands-aware evaluator; the converter
+that turns world quality into points (a value head with ±28-pt hand
+sensitivity) did not exist then. Plan rule: "don't retry without new
+evidence" — +12.6*** is the new evidence. Scope going forward: dead
+for raw-path marginalization; OPEN for search-world quality with the
+current evaluator.
+
+**Cheap next probe (pre-registered): oracle-mixture dose-response.**
+Replace q of the 45 fair worlds with the true deal, q ∈ {0, 25, 50,
+100}% (q=0 fair, q=100 cheating ≈ today's arms), same config. The
+curve says how belief-model quality maps to points — i.e. how good an
+inference model must be before it pays, and how much of +12.6 is world
+quality (a) vs concentration (c). Runs in the same harness with a
+small `ApplicationArena` flag.
+
+Levers now on the table are COMPLEMENTARY, all feeding the same
+mechanism: hands-conditional targets fix the prior INSIDE each world
+(plan NEXT #1); belief-weighted determinization fixes WHICH worlds are
+searched; exact endgame targets strengthen the value head that cashes
+both. gen-10's JTR export + external re-calibration remain pending.

@@ -2463,3 +2463,127 @@ after three CE-doesn't-convert results, not worth a 256k collect to
 chase. **No champion change: gen-10 = 10-ctrl** (all three 128k nets
 arena-equal to it). Next gain requires a NEW TARGET SOURCE, not more
 self-play scale — see plan NEXT.
+
+## 2026-07-12 — Cheating-raw RE-RUN at gen-9, head-to-head: perfect information is worth ZERO to the raw policy — 101/250 paired deals end in identical scores
+
+Re-run of the 2026-07-05 cheating diagnostic (that one was gen-7,
+common-opponent design, and bounded the info value at ~1 pt). Motivated
+by the target-source pivot: before investing in better card inference
+(belief-weighted determinization etc.), re-measure what perfect hand
+knowledge is even worth to the current net. Sharper design this time:
+**same net both sides, head-to-head, paired stats** — no differencing
+of two noisy vs-POWERFUL margins.
+
+gen-9 cheating-raw (single forward pass on the TRUE hands) vs gen-9
+fair-raw (policy averaged over the round's sampled determinizations),
+JTR in-process arena (`ApplicationArena`, JTR commit 01ce4f1), both
+sides `SWEEP_64` / `--pgx-raw`, `--cheating1`, 250 pairs / 500 games,
+seed 42, rule-based trump both sides (symmetric; the trump phase is
+NOT probed here):
+
+**mean diff −1.0/pair (−0.5/game), t=−0.499, p=0.6182; sign
+75W–74L–101T.** Dead wash — and 40% of paired deals produced EXACTLY
+the same score, i.e. the true-hands policy mostly plays the same moves
+as the 40-world average.
+
+Reading: determinization-averaging at the input is completely free at
+gen-9 (stronger than gen-7's "~1 pt"). Either hidden-hand information
+is intrinsically near-worthless to a one-shot policy, or the net is
+not USING the hands input at all. Those have very different
+implications — discriminated by the sensitivity probe (next entry).
+Companion arm still running: cheating-PUCT vs fair-PUCT at SWEEP_64
+(never run before — bounds what perfect information is worth to the
+SEARCH, which is what belief-weighted determinization would improve).
+
+## 2026-07-12 — Hidden-hand sensitivity probe: the POLICY head is hands-BLIND (KL 0.003), the VALUE head is hands-AWARE (±28 pts) — and the aggregated-visits target TRAINS the blindness in
+
+Probe script: `scripts/jass_hidden_hand_probe.py` (in-repo, exact
+experiment). Method: 128 on-policy games with gen-9 (fingerprint
+29639.75, sampled τ=1); at each of 3,407 card-play decisions with >1
+legal move, hold all public info fixed and resample the hidden hands 8
+times via `sample_determinization` (void-aware, the searchers' own
+sampler); compare net outputs true-world vs resampled-worlds.
+
+| head | sensitivity to WHERE the hidden cards sit |
+|:--|:--|
+| policy | KL(true‖world) mean **0.0030** (median 0.0013) vs entropy 0.80; argmax flips **4.1%** |
+| value | std across worlds **28.5 pts** mean, p90 48.9 (vs mean \|v\| 60.9 pts) |
+
+Per-trick: value std runs 41.7 pts (trick 0) → 11.8 (trick 7) —
+uncertainty resolving as cards fall; policy KL is flat ~0.003
+everywhere. **The policy head almost completely ignores card-matrix
+columns 1–3 (partner/left/right holds); the value head conditions on
+them heavily.** This fully explains the cheating-raw wash: cheating
+feeds the policy head information it never uses.
+
+**The blindness is STRUCTURAL, not a learning failure.** Collection
+pairs true-state features (hands columns included) with a policy
+target that is the visit sum across K=16 determinized trees — a target
+that by construction depends only on the INFORMATION SET, not on the
+true hidden hands. Given that label, the CE-optimal policy is exactly
+a hands-blind one; training actively teaches the policy head that the
+hands columns are noise. The value head's label (actual game outcome)
+DOES depend on the true hands — so it learned to use them. One
+pipeline, two heads, opposite lessons.
+
+**Why this reframes the plateau:** the 16 per-world searches produce
+16 DIFFERENT visit distributions (they must — the value head's 28-pt
+world-sensitivity says the Q landscape differs per world: finesses
+work in one world, fail in another). Summing them throws that variance
+away — the aggregation step discards per-position information the
+pipeline already computes, and it is precisely the hands-conditional
+dimension the input features have room to encode. Capacity washed
+because nothing hands-conditional was left in the labels for extra
+params to learn. It also feeds the operator fixed point: each
+determinized tree is guided by a hands-blind prior, so per-world
+search re-derives hand-specific tactics from scratch through the value
+head every time — the self-confirmation the grounded-teacher probes
+kept hitting.
+
+**NEW CANDIDATE — hands-conditional policy targets** (per-world visit
+distributions paired with per-world features, instead of the aggregate
+paired with true-state features). Same collection compute; the
+per-world visits exist right before the sum. Deployment is unaffected:
+JTR fair-raw already averages the policy over sampled worlds, which
+becomes the CORRECT inference-time marginalization of a
+hands-conditional policy (exactly how the value head is already used).
+Gate design (pre-registered, decision order):
+
+0. **Arm B informs (in flight):** cheating-PUCT vs fair-PUCT bounds
+   the value-head-only oracle gain at SWEEP_64.
+1. **Teacher-signal pre-probe (no training, cheap — the kill switch):**
+   at the standing collection config (muzero K=16×64), measure
+   across-world disagreement of the 16 root visit distributions per
+   move (pairwise KL + argmax disagreement). If per-world teachers
+   agree everywhere, the hands-conditional label adds no information
+   at this budget → arm dies before any collection. Prediction from
+   the value head's 28-pt sensitivity: they disagree substantially.
+2. **Collection change:** per move, emit per-world policy rows
+   ((cm_k, hd_k) of the determinized root, π_k = that tree's root
+   visits) alongside the existing true-state row. Value label y stays
+   on the true-state row ONLY (world-k features + true-world outcome
+   is a mismatched value pair) → per-row value-loss mask in
+   train_step, or first arm = per-world rows carry policy loss only.
+   16 policy rows/move at the same game count; subsample worlds
+   (e.g. 4) if corpus memory bites. Standard 32×2048 collect from the
+   gen-10 generator.
+3. **Train:** gen-11hc, standing recipe (128/2/4, ES armed).
+   **Control: gen-11ctrl on the SAME collect's standard rows**
+   (aggregated target) — same generator, so target construction is
+   the only delta; ctrl also banks the routine ~+2.5 corpus refresh.
+4. **Gates, in order:**
+   a. **Mechanism check:** re-run `jass_hidden_hand_probe.py` on the
+      student — policy KL must move well off 0.003. Still blind →
+      the targets didn't bind; debug before any arena time.
+   b. **Raw gate:** gen-11hc vs gen-11ctrl head-to-head, two seeds,
+      DECISIVE (must clear the ctrl, not just gen-10 — capacity-sweep
+      discipline); vs gen-10 for the record.
+   c. **Operator re-probe:** muzero K=16×64 vs gen-11hc raw. The
+      hypothesis predicts the margin RE-OPENS (hands-conditional
+      priors make each world's search start from world-appropriate
+      play). A re-opened operator restarts the crank — the big prize
+      even if (b) is thin.
+   d. **External:** JTR raw + PUCT margins as usual (fair mode).
+   Fork: (a) fails → fix pairing. (a) passes but (b)+(c) wash →
+   hands-conditional info doesn't convert; direction dead, exact
+   endgame targets next. (c) re-opens → iterate the crank.

@@ -37,7 +37,9 @@ information. gen-10 = 10-ctrl stands (all nets arena-equal; parsimony).
 
 **NEXT (DECIDED 2026-07-13): gen-11 = HANDS-CONDITIONAL POLICY
 TARGETS.** Procedure → jass_sop.md "gen-11 — hands-conditional
-targets"; pre-registered gates → log 2026-07-12 (teacher-signal
+targets" (pgx code changes ALL LANDED 2026-07-13:
+`make_puct_hc_collect_fn` → `train_pv_model(head_masks=True)`);
+pre-registered gates → log 2026-07-12 (teacher-signal
 entry). The design discussion compared the two quantified levers and
 chose the target fix first, for three reasons:
 1. **Cost.** It is a standard-round-sized, all-pgx change: the

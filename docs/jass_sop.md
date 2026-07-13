@@ -203,27 +203,32 @@ the FIRST four are fine). 32×2048 games ⇒ ~64k value rows (standard)
 too. ⚠ Do NOT train the hc arm's policy on the true-state row: true
 features + marginal target is exactly the blindness bug.
 
-**Code changes (all pgx):**
-1. `jass_puct.py` — extend the `return_visits=True` contract to also
-   return `det_states` (the (K,)-batched determinized roots):
-   `(scores, legal, visits, det_states)`. Update the single caller
-   (`scripts/jass_teacher_signal_probe.py`) to unpack 4. Per-world
-   features are then `jax.vmap(lambda s: value_features(s, player))
-   (det_states)` — subset to the first W before featurizing.
-2. `jass_selfplay.py` — an hc variant of `_play_one_pv`/`_collect_pv`
-   (policy_fn returns `(action, pi_agg, world_cm, world_hd,
-   world_pi)`); per step emit the (1+W) rows above, all sharing the
-   step's `legal` and alive mask. Keep the existing collect fns
-   untouched (the ctrl arm and any rollback need them).
-3. `jass_value_net.py` — `make_pv_train_step` gains per-row
-   `v_mask`/`p_mask` (replacing the single `mask` on the hc path):
+**Code changes (all pgx) — ALL LANDED 2026-07-13:**
+1. `jass_puct.py` — `return_visits=True` now returns `(scores, legal,
+   visits, det_states)` (det_states = the (K,)-batched determinized
+   roots); the single caller (`scripts/jass_teacher_signal_probe.py`)
+   unpacks 4. Per-world features are `jax.vmap(value_features,
+   in_axes=(0, None))` over the first W det_states.
+2. `jass_selfplay.py` — `_play_one_pv_hc`/`_collect_pv_hc` (policy_fn
+   returns `(action, pi_agg, world_cm, world_hd, world_pi)`); each
+   step emits the (1+W) rows above, all sharing the step's `legal`
+   and alive mask, as `(cm, hd, labels, pi, legal, v_mask, p_mask)`
+   with a row axis after T. The generator entry point is
+   `jass_puct.make_puct_hc_collect_fn(..., num_world_rows=4)`;
+   `hc_batch_to_pv` slices the true rows back out as a legacy PV
+   batch (the ctrl arm's view of the same corpus). Existing collect
+   fns untouched (the ctrl arm and any rollback need them).
+3. `jass_value_net.py` — `make_pv_train_step(head_masks=True)` takes
+   per-row `v_mask`/`p_mask` (replacing the single `mask`):
    `v_loss = Σ v_sq·v_mask / Σ v_mask`, `p_loss = Σ ce·p_mask /
    Σ p_mask`, total `v_loss + policy_weight·p_loss`. Normalizing each
    head by its OWN mask sum preserves the current head balance
-   despite 4× more policy rows. Mirror the change in the
-   accum/pmap `sum_loss_fn` path (sums stay linear; carry both mask
-   sums). Legacy single-mask signature stays for the ctrl arm —
-   checkpoint-resume streams of old runs must remain untouched.
+   despite 4× more policy rows. Accum/pmap paths match exactly (the
+   heads' different normalizers are folded into each microbatch's
+   loss as constants, so summed grads stay exact; verified by test).
+   Train via `train_pv_model(collect_fn=<hc>, head_masks=True)`.
+   Legacy single-mask signature is untouched code — checkpoint-resume
+   streams of old runs are bit-for-bit unaffected.
 
 **Stage 1 — collect ONCE from CHAMP=gen-10 (=10-ctrl, 128/2/4).**
 Standing muzero recipe, passed explicitly: `num_determinizations=16,

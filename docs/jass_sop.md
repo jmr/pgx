@@ -174,7 +174,94 @@ Diagnostics:
   raw. Large + while PUCT-vs-PUCT is flat = the search is masking real policy
   gains (this is now the standing gate, above).
 
-## gen-10 — capacity sweep (2026-07-09, CURRENT)
+## gen-11 — hands-conditional policy targets (2026-07-13, CURRENT)
+
+**Decision + justification → plan NEXT (2026-07-13); pre-registered
+gates → log 2026-07-12 (teacher-signal entry). Evidence: log
+2026-07-12/13 (hidden-hand probe, teacher-signal probe, oracle arc).**
+
+**Principle.** Collection today pairs TRUE-state features with the
+visit sum across K=16 determinized trees — an info-set-marginal
+target that trains the policy head to ignore the hidden-hand input
+columns (measured: net KL 0.003 across worlds vs teacher JSD 0.24).
+gen-11 fixes the pairing: each world's visit distribution becomes a
+training row on THAT world's features. The value label stays on the
+true-state row only (world features + true-world outcome would be a
+mismatched value pair).
+
+**Row types emitted per move (one collect serves BOTH arms):**
+
+| row | features | pi | y | hc-arm masks | ctrl arm |
+|:--|:--|:--|:--|:--|:--|
+| 1× true-state | `value_features(state)` | aggregate (kept for ctrl) | outcome | v_mask=1, p_mask=0 | uses this row ONLY, legacy single mask |
+| W=4× per-world | `value_features(det_states[k])` | tree-k root visits, normalized over legal | ignored | v_mask=0, p_mask=1 | unused |
+
+W=4 of the K=16 trees (they are iid samples given the info set, so
+the FIRST four are fine). 32×2048 games ⇒ ~64k value rows (standard)
++ ~256k policy rows (4× standard policy data). Trump-declare steps
+(phase 0) get the same treatment — the trump search is determinized
+too. ⚠ Do NOT train the hc arm's policy on the true-state row: true
+features + marginal target is exactly the blindness bug.
+
+**Code changes (all pgx):**
+1. `jass_puct.py` — extend the `return_visits=True` contract to also
+   return `det_states` (the (K,)-batched determinized roots):
+   `(scores, legal, visits, det_states)`. Update the single caller
+   (`scripts/jass_teacher_signal_probe.py`) to unpack 4. Per-world
+   features are then `jax.vmap(lambda s: value_features(s, player))
+   (det_states)` — subset to the first W before featurizing.
+2. `jass_selfplay.py` — an hc variant of `_play_one_pv`/`_collect_pv`
+   (policy_fn returns `(action, pi_agg, world_cm, world_hd,
+   world_pi)`); per step emit the (1+W) rows above, all sharing the
+   step's `legal` and alive mask. Keep the existing collect fns
+   untouched (the ctrl arm and any rollback need them).
+3. `jass_value_net.py` — `make_pv_train_step` gains per-row
+   `v_mask`/`p_mask` (replacing the single `mask` on the hc path):
+   `v_loss = Σ v_sq·v_mask / Σ v_mask`, `p_loss = Σ ce·p_mask /
+   Σ p_mask`, total `v_loss + policy_weight·p_loss`. Normalizing each
+   head by its OWN mask sum preserves the current head balance
+   despite 4× more policy rows. Mirror the change in the
+   accum/pmap `sum_loss_fn` path (sums stay linear; carry both mask
+   sums). Legacy single-mask signature stays for the ctrl arm —
+   checkpoint-resume streams of old runs must remain untouched.
+
+**Stage 1 — collect ONCE from CHAMP=gen-10 (=10-ctrl, 128/2/4).**
+Standing muzero recipe, passed explicitly: `num_determinizations=16,
+num_simulations=64, search_variant="muzero", pb_c_init=1.25,
+dirichlet_fraction=0, temperature=1.0`; standard 32×2048
+(restart-safe per-shard). Re-run `profile_collect_fn` — the extra
+per-world featurization is forward-free but the emitted arrays are
+~5× per step; check per-chip B=8 still fits.
+
+**Stage 2 — train two arms, same arch (128/2/4), full 20k, ES armed:**
+- `gen-11hc` — value on true rows, policy on world rows (new masks).
+- `gen-11ctrl` — true rows only, standard recipe: the corpus-refresh
+  bar (~+2.5) AND the target-construction control (same generator,
+  same games; the ONLY delta is target pairing).
+⚠ Holdout split must stay GAME-level (per-shard batches, as now) so
+world rows and the true row of the same position never straddle the
+split. ⚠ Holdout policy CE is NOT comparable to any previous
+generation (different target type AND features); compare hc-vs-ctrl
+value floors only. Value channel is unchanged in size — expect the
+usual U-curve watch.
+
+**Stage 3 — gates, in the pre-registered order (log 2026-07-12):**
+1. Mechanism check BEFORE arena time:
+   `python scripts/jass_hidden_hand_probe.py --weights <gen-11hc>` —
+   policy KL must move well off 0.003 toward (not necessarily to)
+   the teacher's 0.24. Still ~0.003 ⇒ the pairing didn't bind; debug.
+2. Raw gate, two seeds: gen-11hc vs gen-11ctrl (DECISIVE — must clear
+   the control, capacity-sweep discipline) + vs gen-10 for the record.
+3. Operator re-probe: muzero K=16×64 vs gen-11hc raw. Re-opened
+   margin = the prize (restart the crank) even if (2) is thin.
+4. External: JTR raw + PUCT vs POWERFUL (fair mode — determinization
+   averaging is the CORRECT marginalization of a hands-conditional
+   policy at inference).
+Forks: (1) fails → fix pairing. (1) passes, (2)+(3) wash →
+hands-conditional info doesn't convert; next = exact endgame targets
+(plan queue). (3) re-opens → iterate the crank as gen-12.
+
+## gen-10 — capacity sweep (2026-07-09, DONE 2026-07-10 — all arms arena-equal, 10-ctrl promoted; see log)
 
 The operator is saturated (both muzero PUCT and JTR's classical MCTS
 extract ≈0 over gen-9 raw — plan snapshot 2026-07-07), so capacity is
@@ -259,7 +346,7 @@ overfit → wash; depth (10b) clean but still washed. Full read in the
 experiment log (2026-07-10 entries). One confound left: width's wash
 was data-starvation (256-wide, 64k), so it gets re-run well-fed next.
 
-## gen10c — the 128k width re-feed (2026-07-10, CURRENT)
+## gen10c — the 128k width re-feed (2026-07-10, DONE 2026-07-11 — capacity dead; see log)
 
 Resolves the one open sweep confound: was 256/2's wash just data
 starvation? Still the **gen-10 family** (gen-9-generated corpus), just

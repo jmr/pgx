@@ -9,7 +9,7 @@ markers as work completes. **Dated experiment results and diagnostics live in
 `docs/jass_experiment_log.md`** (append new results there; this file keeps
 conclusions and pointers). The per-generation procedure is `docs/jass_sop.md`.
 
-## Status snapshot (2026-07-11)
+## Status snapshot (2026-07-13)
 
 **CHAMPION: gen-10 (= 10-ctrl, `PolicyValueNetAttn` 128/2/4 on the
 fresh gen-9 corpus) — PROMOTED 2026-07-10, raw +2.5/+2.4 vs gen-9,
@@ -35,70 +35,52 @@ anything — operator saturation (search(π)≈π) surfacing on the training
 side. The ~+2.5/gen corpus refresh just reshuffles the same
 information. gen-10 = 10-ctrl stands (all nets arena-equal; parsimony).
 
-**NEXT (2026-07-12, revised): the lever is a NEW TARGET SOURCE, not
-more self-play scale — a strategic pivot.** Every within-self-play
-lever is exhausted (operator saturated, capacity dead, coverage dead).
-Under the standing constraints — JTR games off-limits (Step 4b); the
-determinization/card-assignment NOT-retry now RE-SCOPED to the
-raw-input path only (log 2026-07-12: cheating-PUCT +12.6*** overturns
-it for the search path) — the levers are richer TARGET information
-and better WORLD selection for the searcher. Candidate directions (TO
-BE CHOSEN by design discussion, not yet committed):
-1. **Hands-conditional policy targets (NEW 2026-07-12 — leading cheap
-   candidate).** The hidden-hand sensitivity probe
-   (`scripts/jass_hidden_hand_probe.py`, log 2026-07-12) showed the
-   policy head is hands-BLIND (KL 0.003 across resampled worlds) while
-   the value head is hands-AWARE (±28 pts) — and the blindness is
-   trained in: the aggregated-visits target is info-set-marginal by
-   construction, so summing the K=16 per-world visit distributions
-   throws away the hands-conditional information the pipeline already
-   computes. Fix the target pairing (per-world visits ↔ per-world
-   features), same collection compute. Full pre-registered gate design
-   in the log entry; kill switch = the cheap teacher-signal pre-probe
-   (do the 16 trees actually disagree across worlds?). Predicts the
-   operator RE-OPENS on the student.
-2. **Belief-weighted determinization (NEW 2026-07-12 — largest
-   measured headroom).** The oracle bound: cheating-PUCT beats
-   fair-PUCT **+12.6/game*** (t=11.3)** where cheating-raw is a dead
-   wash — hidden-hand info is cashed through SEARCH (tree on true
-   holdings + the hands-aware value head), and fair search spreads
-   its budget over mostly-wrong worlds. A learned belief model over
-   hidden hands (predict card locations from bidding/play history;
-   sample/weight determinizations by it) harvests part of that pool.
-   **Dose-response DONE (log 2026-07-13): LINEAR, Δ ≈ 12.6·q/game —
-   no near-perfect-inference threshold; every increment of belief
-   quality pays proportionally** (q=0.25 → +2.85**, q=0.5 →
-   +6.35***). Build order if chosen: hidden-hand prediction head
-   (labels already in every collected game) → belief-weighted world
-   sampling → same-harness re-measure. Supersedes the blanket
-   NOT-retry (re-scoped: thesis-era CardsEstimator had no hands-aware
-   evaluator to convert world quality into points).
-3. **Exact endgame targets (strongest "new information" argument).**
-   Late in a hand (few cards left) the determinized subgame is small
-   enough to SOLVE exactly. Exact endgame values/policies are genuinely
-   richer than the net's own bootstrapped value — information the
-   saturated operator cannot manufacture — feeding the value head (and
-   late-trick policy) a non-self-referential signal. Synergy with (1):
-   solved endgame policies are hands-conditional by nature.
-4. **Exploration / state-space coverage.** Self-play is near-greedy;
-   higher-τ or opponent-diversified self-play could surface informative
-   positions the policy avoids — enriches the target DISTRIBUTION rather
-   than per-position richness. Downgraded 2026-07-11: the gen10c
-   coverage control (128k vs 64k wash) is mild evidence against pure
-   coverage.
-5. **A different-CLASS improvement operator** (not determinized PUCT).
-   Lower odds — this operator class is the one shown saturated — but a
-   fundamentally different search (solver-backed, opponent-modeling) is
-   not ruled out.
+**NEXT (DECIDED 2026-07-13): gen-11 = HANDS-CONDITIONAL POLICY
+TARGETS.** Procedure → jass_sop.md "gen-11 — hands-conditional
+targets"; pre-registered gates → log 2026-07-12 (teacher-signal
+entry). The design discussion compared the two quantified levers and
+chose the target fix first, for three reasons:
+1. **Cost.** It is a standard-round-sized, all-pgx change: the
+   per-world visit distributions and world states already exist at
+   collection time (`puct_search(..., return_visits=True)` landed
+   2026-07-12); what's new is dataset plumbing (K policy rows per
+   move) and a per-head loss mask. Belief-weighted determinization
+   is a mini-project by comparison: the belief model CANNOT be a head
+   on the PV net (its input contains the answer), so it needs a
+   public-info-only model, new history features, the marginals→joint
+   sampling problem the thesis-era AR variants died on, and
+   cross-repo integration.
+2. **Upside shape.** Belief weighting is a one-time level shift
+   bounded by 12.6·q. Hands-conditional targets attack the operator
+   fixed point itself (each determinized tree currently searches
+   under a hands-BLIND prior — the self-confirmation loop); if the
+   operator margin re-opens on the student, the generational crank
+   restarts, which compounds.
+3. **Sequencing synergy.** A hands-conditional policy IS the core of
+   a belief model: once the net gives P(action | world), candidate
+   worlds can be weighted by the likelihood of the opponents'
+   OBSERVED plays (particle-filter style) — belief weighting with no
+   separate belief net and no joint-sampling problem. Doing targets
+   first makes the belief lever nearly free later.
 
-Oracle context for (1)/(2) (log 2026-07-12, gen-9, JTR, same day/
-harness): cheating-raw vs fair-raw = dead wash (−0.5/game ns, 101/250
-exact-tie pairs) — perfect information is worth ZERO to the raw
-policy, exactly as the trained-in blindness predicts; cheating-PUCT
-vs fair-PUCT = **+12.6/game*** — worth ~2.5× the whole POWERFUL
-margin to the search. (1), (2) and (3) are complementary: (1) fixes
-the prior inside each world, (2) fixes which worlds are searched,
-(3) strengthens the value head that cashes both.
+**Evidence base (all gen-9, log 2026-07-12/13):** policy head
+hands-blind (KL 0.003) / value head hands-aware (±28 pts) — blindness
+trained in by the info-set-marginal aggregate target; teacher signal
+large (across-world JSD 0.24 vs 0.0000 same-world floor; 25% of
+per-world argmaxes differ from the aggregate's); oracle pool +12.6·q
+per game, LINEAR in q (dose-response 2026-07-13), zero on the raw
+path.
+
+**Queued candidates (deferred, not dead):**
+- **Belief-weighted determinization** — revisit AFTER gen-11hc as
+  policy-likelihood world reweighting (see synergy above). The linear
+  dose-response guarantees the pool persists; the NOT-retry stays
+  re-scoped (dead for raw-input marginalization only).
+- **Exact endgame targets** — strongest "new information" argument;
+  solved endgame policies are hands-conditional by nature, so gen-11
+  infrastructure feeds it.
+- **Exploration/coverage** (downgraded 2026-07-11) and a
+  **different-class operator** (lowest odds) — unchanged.
 
 Measurement is unchanged: gate raw-vs-raw vs gen-10; margin vs POWERFUL
 (net trump on) as the external yardstick. (Superseded: the 2026-07-07

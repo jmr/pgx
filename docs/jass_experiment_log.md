@@ -2693,3 +2693,49 @@ whenever we choose to spend it.** Runtime note: 24 games ≈ 5 min on
 the local CPU — the probe re-runs cheaply on any future student
 (mechanism check = its policy KL moving toward this JSD, not to it —
 some across-world variance is value-driven, not prior-learnable).
+
+## 2026-07-13 — Oracle-mixture dose-response: LINEAR, Δ ≈ 12.6·q per game — belief quality pays PROPORTIONALLY, no near-perfect-inference threshold
+
+The pre-registered dose-response (2026-07-12 entry), run overnight.
+New JTR knob `--true-world-fracN=<q>` (JTR change `svsywqto`): each
+determinization keeps the TRUE hidden hands with probability q
+instead of sampling (per-det coin in `JassBoard`, propagated through
+`duplicate()`; rejected with `--cheatingN`/`--pgx-rawN`). Arms: gen-9
+mixture-PUCT vs gen-9 fair-PUCT, SWEEP_64 both sides, 250 pairs / 500
+games, seed 42, rule-based trump (identical harness to the q=0/q=1
+endpoints measured 2026-07-12; ~2h05m per arm).
+
+| q (true-world share) | Δ/game | t | p | sign | Δ per unit q |
+|:--|:--|:--|:--|:--|:--|
+| 0 (fair) | 0 (baseline) | — | — | — | — |
+| 0.25 | +2.85 | 3.20 | 0.0015 | 91W–50L–109T | 11.4 |
+| 0.50 | +6.35 | 6.53 | <0.0001 | 123W–44L–83T | 12.7 |
+| 1.00 (≈cheating) | +12.6 | 11.30 | <0.0001 | 161W–38L–51T | 12.6 |
+
+**The curve is linear (11.4 / 12.7 / 12.6 per unit q — no knee, no
+plateau).** Readings:
+1. **No threshold effect.** The feared shape — "inference must be
+   nearly perfect before it pays" — is ruled out. Every increment of
+   true-world mass converts to points at a constant ~+12.6/game per
+   unit. Even q≈0.2-equivalent belief quality is a measurable
+   +2–3/game, i.e. the size of a whole corpus-refresh generation.
+2. **Consistent mechanism:** the payoff tracks the SHARE of search
+   budget spent on the right world — exactly the quantity a belief
+   model improves. No super-additive compute-concentration effect
+   near q=1 (concentration would bow the curve upward late).
+3. **Honest mapping caveat:** q is mass on the EXACT true world. A
+   realistic belief net buys partial overlap (decision-relevant cards
+   in the right places) rather than exact-world mass, so the
+   practical exchange rate will differ — but linearity means partial
+   quality pays partially; there is no cliff to clear.
+4. **If candidate 2 is pursued**, the build order is: hidden-hand
+   prediction head (the aux labels — true hands — are already in
+   every collected game), then belief-weighted world sampling in the
+   searchers, re-measured in this exact harness. Any deployment gain
+   still gates vs the champion as usual.
+
+Full oracle arc now complete (all 2026-07-12/13, gen-9, JTR commit
+01ce4f10 + `svsywqto`): raw path worth ZERO (policy trained
+hands-blind by the marginal target) → search path worth +12.6·q,
+linear → teacher signal for hands-conditional targets large (JSD
+0.24 vs 0.0000 floor). The two live levers are quantified end to end.

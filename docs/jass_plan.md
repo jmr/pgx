@@ -65,12 +65,14 @@ BE CHOSEN by design discussion, not yet committed):
    its budget over mostly-wrong worlds. A learned belief model over
    hidden hands (predict card locations from bidding/play history;
    sample/weight determinizations by it) harvests part of that pool.
-   First step is NOT a model: the pre-registered oracle-mixture
-   dose-response (log 2026-07-12) — replace q of 45 worlds with the
-   true deal, map belief quality → points, and learn how much of
-   +12.6 is world quality vs compute concentration. Supersedes the
-   blanket NOT-retry (re-scoped: thesis-era CardsEstimator had no
-   hands-aware evaluator to convert world quality into points).
+   **Dose-response DONE (log 2026-07-13): LINEAR, Δ ≈ 12.6·q/game —
+   no near-perfect-inference threshold; every increment of belief
+   quality pays proportionally** (q=0.25 → +2.85**, q=0.5 →
+   +6.35***). Build order if chosen: hidden-hand prediction head
+   (labels already in every collected game) → belief-weighted world
+   sampling → same-harness re-measure. Supersedes the blanket
+   NOT-retry (re-scoped: thesis-era CardsEstimator had no hands-aware
+   evaluator to convert world quality into points).
 3. **Exact endgame targets (strongest "new information" argument).**
    Late in a hand (few cards left) the determinized subgame is small
    enough to SOLVE exactly. Exact endgame values/policies are genuinely

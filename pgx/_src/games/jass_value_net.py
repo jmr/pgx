@@ -274,7 +274,8 @@ def make_pv_train_step(model: PolicyValueNet,
                        optimizer: optax.GradientTransformation,
                        policy_weight: float = 1.0,
                        accum_steps: int = 1,
-                       pmap_axis: str = None):
+                       pmap_axis: str = None,
+                       head_masks: bool = False):
     """Return a jit-compiled training step for the joint policy+value net.
 
     accum_steps > 1 splits each batch into that many sequential
@@ -295,6 +296,17 @@ def make_pv_train_step(model: PolicyValueNet,
     losses are likewise replicated (read index [0]). accum_steps then
     applies per shard (rarely needed: sharding 8-ways already cuts
     activation memory 8×).
+
+    head_masks=True returns a step whose single `mask` argument is
+    replaced by per-row `v_mask`/`p_mask`:
+    (params, opt_state, cm, hd, y, pi, legal, v_mask, p_mask). Each
+    head's loss is normalized by its OWN mask sum — with hc corpora
+    (~4× more policy rows than value rows, sop gen-11) that preserves
+    the standing head balance instead of diluting the value loss. Rows
+    can be value-only (true-state rows), policy-only (per-world rows),
+    both, or padding (both masks 0). The legacy single-mask signature
+    is untouched code, so existing runs and their checkpoint-resume
+    streams are bit-for-bit unaffected.
     """
 
     @jax.jit
@@ -395,6 +407,99 @@ def make_pv_train_step(model: PolicyValueNet,
             (grads, v_sum, p_sum, mask.sum()), pmap_axis)
         return apply_from_sums(params, opt_state, grads, v_sum, p_sum, denom)
 
+    def hc_loss_terms(p, cm, hd, y, pi, legal):
+        logits, v = model.apply(p, cm, hd)
+        v_sq = (v - y / TARGET_SCALE) ** 2
+        masked_logits = jnp.where(legal, logits, jnp.float32(-1e9))
+        logp = jax.nn.log_softmax(masked_logits, axis=-1)
+        ce = -(pi * logp).sum(axis=-1)
+        return v_sq, ce
+
+    @jax.jit
+    def train_step_hc(params, opt_state, cm, hd, y, pi, legal,
+                      v_mask, p_mask):
+        def loss_fn(p):
+            v_sq, ce = hc_loss_terms(p, cm, hd, y, pi, legal)
+            v_loss = (v_sq * v_mask).sum() / v_mask.sum().clip(1)
+            p_loss = (ce * p_mask).sum() / p_mask.sum().clip(1)
+            return v_loss + policy_weight * p_loss, (v_loss, p_loss)
+
+        (loss, (v_loss, p_loss)), grads = jax.value_and_grad(
+            loss_fn, has_aux=True)(params)
+        updates, new_opt_state = optimizer.update(grads, opt_state, params)
+        return (optax.apply_updates(params, updates), new_opt_state,
+                loss, v_loss, p_loss)
+
+    def hc_sum_loss_fn(p, mb, v_den, p_den):
+        """Globally-normalized hc loss of one microbatch, plus raw sums.
+
+        The two heads carry different normalizers, so (unlike the legacy
+        path) a summed gradient cannot be rescaled by one scalar after
+        accumulation; instead the GLOBAL denominators are folded into
+        every microbatch's loss (constants under grad), keeping the
+        accumulated/psum'd gradient exact.
+        """
+        mb_cm, mb_hd, mb_y, mb_pi, mb_legal, mb_vm, mb_pm = mb
+        v_sq, ce = hc_loss_terms(p, mb_cm, mb_hd, mb_y, mb_pi, mb_legal)
+        v_sum = (v_sq * mb_vm).sum()
+        p_sum = (ce * mb_pm).sum()
+        return v_sum / v_den + policy_weight * p_sum / p_den, (v_sum, p_sum)
+
+    hc_grad_fn = jax.value_and_grad(hc_sum_loss_fn, has_aux=True)
+
+    def hc_sum_grads(params, batch, v_den, p_den):
+        if accum_steps == 1:
+            (_, sums), grads = hc_grad_fn(params, batch, v_den, p_den)
+            return grads, sums
+        pad = (-batch[0].shape[0]) % accum_steps
+        if pad:  # zero rows: both masks 0 → contribute nothing
+            batch = tuple(
+                jnp.pad(a, ((0, pad),) + ((0, 0),) * (a.ndim - 1))
+                for a in batch)
+        batch = tuple(
+            a.reshape((accum_steps, -1) + a.shape[1:]) for a in batch)
+
+        def body(carry, mb):
+            g_acc, v_acc, p_acc = carry
+            (_, (v_sum, p_sum)), g = hc_grad_fn(params, mb, v_den, p_den)
+            g_acc = jax.tree_util.tree_map(jnp.add, g_acc, g)
+            return (g_acc, v_acc + v_sum, p_acc + p_sum), None
+
+        init = (jax.tree_util.tree_map(jnp.zeros_like, params),
+                jnp.float32(0.0), jnp.float32(0.0))
+        (grads, v_sum, p_sum), _ = jax.lax.scan(body, init, batch)
+        return grads, (v_sum, p_sum)
+
+    def hc_apply(params, opt_state, grads, v_sum, p_sum, v_den, p_den):
+        # grads are already globally normalized (see hc_sum_loss_fn).
+        v_loss, p_loss = v_sum / v_den, p_sum / p_den
+        loss = v_loss + policy_weight * p_loss
+        updates, new_opt_state = optimizer.update(grads, opt_state, params)
+        return (optax.apply_updates(params, updates), new_opt_state,
+                loss, v_loss, p_loss)
+
+    @jax.jit
+    def train_step_hc_accum(params, opt_state, cm, hd, y, pi, legal,
+                            v_mask, p_mask):
+        v_den = v_mask.sum().clip(1)
+        p_den = p_mask.sum().clip(1)
+        grads, (v_sum, p_sum) = hc_sum_grads(
+            params, (cm, hd, y, pi, legal, v_mask, p_mask), v_den, p_den)
+        return hc_apply(params, opt_state, grads, v_sum, p_sum, v_den, p_den)
+
+    def train_step_hc_pmap(params, opt_state, cm, hd, y, pi, legal,
+                           v_mask, p_mask):
+        v_den = jax.lax.psum(v_mask.sum(), pmap_axis).clip(1)
+        p_den = jax.lax.psum(p_mask.sum(), pmap_axis).clip(1)
+        grads, (v_sum, p_sum) = hc_sum_grads(
+            params, (cm, hd, y, pi, legal, v_mask, p_mask), v_den, p_den)
+        grads, v_sum, p_sum = jax.lax.psum((grads, v_sum, p_sum), pmap_axis)
+        return hc_apply(params, opt_state, grads, v_sum, p_sum, v_den, p_den)
+
+    if head_masks:
+        if pmap_axis is not None:
+            return jax.pmap(train_step_hc_pmap, axis_name=pmap_axis)
+        return train_step_hc if accum_steps == 1 else train_step_hc_accum
     if pmap_axis is not None:
         return jax.pmap(train_step_pmap, axis_name=pmap_axis)
     return train_step if accum_steps == 1 else train_step_accum
@@ -565,6 +670,19 @@ def _flatten_pv(batch):
             alive.reshape(-1).astype(jnp.float32))
 
 
+def _flatten_pv_hc(batch):
+    """Flatten an hc (cm, hd, y, pi, legal, v_mask, p_mask) batch.
+
+    The (B, T, 1+W) row structure flattens away: the head_masks train
+    step is row-based and each row carries its own masks.
+    """
+    cm, hd, y, pi, legal, v_mask, p_mask = batch
+    return (cm.reshape(-1, 36, 12), hd.reshape(-1, 20), y.reshape(-1),
+            pi.reshape(-1, NUM_ACTIONS), legal.reshape(-1, NUM_ACTIONS),
+            v_mask.reshape(-1).astype(jnp.float32),
+            p_mask.reshape(-1).astype(jnp.float32))
+
+
 def _replicate(tree, n_dev):
     """Stack each leaf n_dev times (pmap's replicated-input convention).
 
@@ -604,6 +722,7 @@ def train_pv_model(
     policy_weight: float = 1.0,
     accum_steps: int = 1,
     data_parallel: bool = False,
+    head_masks: bool = False,
     augment: bool = True,
     print_every: int = 100,
     seed: int = 0,
@@ -671,6 +790,15 @@ def train_pv_model(
             accum_steps is usually unnecessary with it). Checkpoints
             stay single-device (interchangeable with data_parallel=False
             runs). Harmless on one device.
+        head_masks: Train on the hands-conditional collect contract
+            (sop gen-11): collect_fn entries must return (cm, hd,
+            labels, pi, legal, v_mask, p_mask) with a per-step row axis
+            (jass_puct.make_puct_hc_collect_fn), and each head's loss
+            is normalized by its own mask sum (see make_pv_train_step).
+            The holdout stays game-level by construction (a separate
+            collect call), so a position's world rows and true row
+            never straddle the split. ⚠ Holdout policy CE is not
+            comparable to single-mask runs (different target pairing).
         augment: Apply a random suit relabeling to every training sample
             each epoch (cm, hd, pi, and legal together; see
             jass_selfplay.augment_suits). Default True — free data
@@ -693,9 +821,15 @@ def train_pv_model(
         (params, model) — trained Flax parameters and the model instance.
     """
     if collect_fn is None:
+        if head_masks:
+            raise ValueError(
+                "head_masks=True needs an hc-contract collect_fn "
+                "(jass_puct.make_puct_hc_collect_fn); the default "
+                "collect_pv_batch returns single-mask batches")
         collect_fn = collect_pv_batch
     collect_fns = (tuple(collect_fn)
                    if isinstance(collect_fn, (list, tuple)) else (collect_fn,))
+    flatten_fn = _flatten_pv_hc if head_masks else _flatten_pv
     key = jax.random.PRNGKey(seed)
 
     if model is None:
@@ -716,7 +850,8 @@ def train_pv_model(
     opt_state = optimizer.init(params)
     n_dev = jax.local_device_count() if data_parallel else 1
     step_fn = make_pv_train_step(model, optimizer, policy_weight, accum_steps,
-                                 pmap_axis="dp" if data_parallel else None)
+                                 pmap_axis="dp" if data_parallel else None,
+                                 head_masks=head_masks)
     # Checkpoints and returned params are always single-device; replication
     # is an internal detail of the data_parallel run.
     unrep = ((lambda t: jax.tree_util.tree_map(lambda x: x[0], t))
@@ -737,8 +872,12 @@ def train_pv_model(
     print("Collecting holdout batch for eval ...")
     key, k_eval = jax.random.split(key)
     eval_fn = eval_collect_fn if eval_collect_fn is not None else collect_fns[0]
-    eval_batch = _flatten_pv(eval_fn(k_eval, batch_size))
-    print(f"  {int(eval_batch[-1].sum())} labeled positions\n")
+    eval_batch = flatten_fn(eval_fn(k_eval, batch_size))
+    if head_masks:
+        print(f"  {int(eval_batch[5].sum())} value rows, "
+              f"{int(eval_batch[6].sum())} policy rows\n")
+    else:
+        print(f"  {int(eval_batch[-1].sum())} labeled positions\n")
     if data_parallel:
         eval_batch = _shard_pv(eval_batch, n_dev)
 
@@ -751,10 +890,11 @@ def train_pv_model(
         if augment:
             k1, k_aug = jax.random.split(k1)
         epoch_collect = collect_fns[epoch % len(collect_fns)]
-        cm, hd, y, pi, legal, mask = _flatten_pv(epoch_collect(k1, batch_size))
+        batch = flatten_fn(epoch_collect(k1, batch_size))
         if augment:
-            cm, hd, pi, legal = augment_suits(k_aug, cm, hd, pi, legal)
-        batch = (cm, hd, y, pi, legal, mask)
+            cm, hd, pi, legal = augment_suits(
+                k_aug, batch[0], batch[1], batch[3], batch[4])
+            batch = (cm, hd, batch[2], pi, legal) + batch[5:]
         if data_parallel:
             batch = _shard_pv(batch, n_dev)
         params, opt_state, train_loss, _, _ = step_fn(

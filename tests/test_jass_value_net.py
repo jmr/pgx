@@ -273,6 +273,119 @@ def test_pv_train_step_mask_zeroes_padding():
     assert jnp.allclose(loss_a, loss_b)
 
 
+def test_pv_train_step_head_masks_matches_legacy():
+    """v_mask = p_mask = mask must reproduce the single-mask step exactly."""
+    model = PolicyValueNet()
+    params = model.init(jax.random.PRNGKey(0),
+                        jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
+    optimizer = optax.sgd(0.1)  # linear in grads — see the accum test
+    opt_state = optimizer.init(params)
+    plain = make_pv_train_step(model, optimizer)
+    hc = make_pv_train_step(model, optimizer, head_masks=True)
+
+    cm, hd, y, pi, legal, mask = _synthetic_pv_batch(jax.random.PRNGKey(1))
+    p_a, _, loss_a, v_a, pl_a = plain(params, opt_state,
+                                      cm, hd, y, pi, legal, mask)
+    p_b, _, loss_b, v_b, pl_b = hc(params, opt_state,
+                                   cm, hd, y, pi, legal, mask, mask)
+    assert jnp.allclose(loss_a, loss_b, rtol=1e-6)
+    assert jnp.allclose(v_a, v_b, rtol=1e-6)
+    assert jnp.allclose(pl_a, pl_b, rtol=1e-6)
+    for x, z in zip(jax.tree_util.tree_leaves(p_a),
+                    jax.tree_util.tree_leaves(p_b)):
+        assert jnp.allclose(x, z, rtol=1e-5, atol=1e-7)
+
+
+def test_pv_train_step_head_masks_isolate_heads():
+    """Value-only rows ignore pi; policy-only rows ignore y (sop gen-11:
+    world rows carry no valid outcome, true rows must not train the
+    policy)."""
+    model = PolicyValueNet()
+    params = model.init(jax.random.PRNGKey(0),
+                        jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
+    optimizer = optax.adam(1e-3)
+    opt_state = optimizer.init(params)
+    step = make_pv_train_step(model, optimizer, head_masks=True)
+
+    cm, hd, y, pi, legal, mask = _synthetic_pv_batch(jax.random.PRNGKey(2),
+                                                     n=32)
+    v_mask = mask.at[16:].set(0.0)   # first half: value rows
+    p_mask = mask.at[:16].set(0.0)   # second half: policy rows
+    p_ref, _, loss_ref, v_ref, pl_ref = step(
+        params, opt_state, cm, hd, y, pi, legal, v_mask, p_mask)
+
+    y_bad = y.at[16:].set(1e6)              # garbage outcome on policy rows
+    pi_bad = pi.at[:16].set(jnp.roll(pi[:16], 1, axis=-1))  # on value rows
+    p_b, _, loss_b, v_b, pl_b = step(
+        params, opt_state, cm, hd, y_bad, pi_bad, legal, v_mask, p_mask)
+
+    assert jnp.array_equal(loss_ref, loss_b)
+    assert jnp.array_equal(v_ref, v_b) and jnp.array_equal(pl_ref, pl_b)
+    for x, z in zip(jax.tree_util.tree_leaves(p_ref),
+                    jax.tree_util.tree_leaves(p_b)):
+        assert jnp.array_equal(x, z)
+
+
+def _hc_synthetic_batch(key, n=64):
+    """Synthetic hc rows: overlapping, unequal v/p masks."""
+    cm, hd, y, pi, legal, mask = _synthetic_pv_batch(key, n=n)
+    rows = jnp.arange(n)
+    v_mask = mask * (rows % 3 == 0)          # every 3rd row: value
+    p_mask = mask * (rows % 3 != 0)          # the rest: policy
+    return cm, hd, y, pi, legal, v_mask, p_mask
+
+
+@pytest.mark.parametrize("n", [64, 30])  # 30: exercises the zero-pad path
+def test_pv_train_step_hc_accum_matches_plain(n):
+    """head_masks accum_steps>1 must match the plain head_masks step."""
+    model = PolicyValueNetAttn(num_layers=1)
+    params = model.init(jax.random.PRNGKey(0),
+                        jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
+    optimizer = optax.sgd(0.1)
+    opt_state = optimizer.init(params)
+    plain = make_pv_train_step(model, optimizer, head_masks=True)
+    accum = make_pv_train_step(model, optimizer, accum_steps=4,
+                               head_masks=True)
+
+    batch = _hc_synthetic_batch(jax.random.PRNGKey(1), n=n)
+    p_a, o_a, loss_a, v_a, pl_a = plain(params, opt_state, *batch)
+    p_b, o_b, loss_b, v_b, pl_b = accum(params, opt_state, *batch)
+
+    assert jnp.allclose(loss_a, loss_b, rtol=1e-5)
+    assert jnp.allclose(v_a, v_b, rtol=1e-5)
+    assert jnp.allclose(pl_a, pl_b, rtol=1e-5)
+    for x, y_ in zip(jax.tree_util.tree_leaves(p_a),
+                     jax.tree_util.tree_leaves(p_b)):
+        assert jnp.allclose(x, y_, rtol=1e-4, atol=1e-6)
+
+
+def test_pv_train_step_hc_pmap_matches_plain():
+    """The head_masks pmap step must produce the same update as plain."""
+    model = PolicyValueNetAttn(num_layers=1)
+    params = model.init(jax.random.PRNGKey(0),
+                        jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
+    optimizer = optax.sgd(0.1)
+    opt_state = optimizer.init(params)
+    plain = make_pv_train_step(model, optimizer, head_masks=True)
+    pstep = make_pv_train_step(model, optimizer, pmap_axis="dp",
+                               head_masks=True)
+
+    n_dev = jax.local_device_count()
+    batch = _hc_synthetic_batch(jax.random.PRNGKey(1), n=64)
+    r_params, r_opt = _replicate((params, opt_state), n_dev)
+
+    p_a, _, loss_a, v_a, pl_a = plain(params, opt_state, *batch)
+    p_b, _, loss_b, v_b, pl_b = pstep(r_params, r_opt,
+                                      *_shard_pv(batch, n_dev))
+
+    assert jnp.allclose(loss_a, loss_b[0], rtol=1e-5)
+    assert jnp.allclose(v_a, v_b[0], rtol=1e-5)
+    assert jnp.allclose(pl_a, pl_b[0], rtol=1e-5)
+    for x, y_ in zip(jax.tree_util.tree_leaves(p_a),
+                     jax.tree_util.tree_leaves(p_b)):
+        assert jnp.allclose(x, y_[0], rtol=1e-4, atol=1e-6)
+
+
 def test_checkpoint_resume_is_equivalent(tmp_path):
     ckpt = str(tmp_path / "ckpt.msgpack")
 
@@ -315,6 +428,30 @@ def test_pv_train_model_smoke():
     logits, value = model.apply(params, jnp.zeros((2, 36, 12)), jnp.zeros((2, 20)))
     assert logits.shape == (2, 43)
     assert value.shape == (2,)
+
+
+def test_pv_train_model_head_masks_smoke():
+    """train_pv_model end to end on the hc contract (sop gen-11)."""
+    from pgx._src.games.jass_puct import make_puct_hc_collect_fn
+
+    gen = PolicyValueNet()
+    gen_params = gen.init(jax.random.PRNGKey(3),
+                          jnp.zeros((1, 36, 12)), jnp.zeros((1, 20)))
+    collect_fn = make_puct_hc_collect_fn(gen.apply, gen_params,
+                                         num_world_rows=2,
+                                         num_determinizations=2,
+                                         num_simulations=4)
+    params, model = train_pv_model(collect_fn=collect_fn, head_masks=True,
+                                   batch_size=2, num_epochs=2,
+                                   print_every=100)
+    logits, value = model.apply(params, jnp.zeros((2, 36, 12)),
+                                jnp.zeros((2, 20)))
+    assert jnp.all(jnp.isfinite(logits)) and jnp.all(jnp.isfinite(value))
+
+
+def test_pv_train_model_head_masks_requires_hc_collect():
+    with pytest.raises(ValueError, match="head_masks"):
+        train_pv_model(head_masks=True, batch_size=2, num_epochs=1)
 
 
 def test_pv_train_model_optimizer_passthrough():

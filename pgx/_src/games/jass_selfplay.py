@@ -34,6 +34,19 @@ Both return (cm, hd, labels, pi, legal, alive):
 Flatten and filter by alive before feeding the trainer, or pass
 alive.reshape(-1).astype(jnp.float32) as a sample-weight mask to avoid
 dynamic shapes inside jit.
+
+Hands-conditional generators (sop gen-11; jass_puct.make_puct_hc_collect_fn)
+emit 1+W training rows per step — the true-state row plus W per-world rows
+pairing each determinization's features with THAT tree's visit
+distribution — and return (cm, hd, labels, pi, legal, v_mask, p_mask)
+with a row axis after T:
+    cm    : (B, T, 1+W, 36, 12) bool  row 0 = true state, rows 1.. = worlds
+    pi    : (B, T, 1+W, 43)     f32   row 0 = aggregate, rows 1.. = per-world
+    v_mask: (B, T, 1+W)         bool  value loss rows (true row, alive)
+    p_mask: (B, T, 1+W)         bool  policy loss rows (world rows, alive)
+labels/legal are broadcast across rows (one game outcome / info-set mask
+per step). Train with train_pv_model(head_masks=True); hc_batch_to_pv
+slices the true rows back out as a legacy PV batch (the ctrl arm).
 """
 
 import functools
@@ -257,6 +270,89 @@ def _collect_pv(policy_fn, key: Array, batch_size: int):
         axis=-1,
     ).squeeze(-1)                 # (B, T)
     return cm, hd, labels, pi, legal, alive
+
+
+# ── Hands-conditional collection (sop gen-11) ─────────────────────────────────
+#
+# An hc policy_fn additionally exposes the per-world teacher signal:
+# policy_fn(state, key) → (action, pi, world_cm, world_hd, world_pi) with
+# world_* carrying a leading (W,) axis (see jass_puct.make_puct_hc_policy_fn).
+# Each step then becomes 1+W training rows: the true-state row (value label,
+# aggregate pi — the ctrl arm's row) and W rows pairing world k's features
+# with tree k's visit distribution (the hands-conditional policy target).
+# Training the policy on the TRUE row would re-create the blindness bug the
+# per-world rows exist to fix, so v_mask/p_mask keep the heads on their own
+# rows.
+
+
+def _play_one_pv_hc(policy_fn, key: Array):
+    """Run one game with an hc policy_fn; record true-state AND world rows."""
+    init_key, play_key = jax.random.split(key)
+    s0 = _game.init(init_key)
+
+    def step_fn(carry, _):
+        s, k = carry
+        done = s.trick_num >= 9
+
+        k, sk = jax.random.split(k)
+        action, pi, wcm, whd, wpi = policy_fn(s, sk)
+
+        cm, hd = value_features(s, s.current_player)
+        legal = _game.legal_action_mask(s)
+        out = (cm, hd, pi, legal, wcm, whd, wpi, s.current_player, ~done)
+
+        ns = _game.step(s, action)
+        ns = jax.tree_util.tree_map(lambda a, b: jnp.where(done, a, b), s, ns)
+        return (ns, k), out
+
+    (final, _), (cm, hd, pi, legal, wcm, whd, wpi, actor, alive) = jax.lax.scan(
+        step_fn, (s0, play_key), None, length=_MAX_STEPS
+    )
+    rew = _game.rewards(final)  # (4,)
+    return cm, hd, pi, legal, wcm, whd, wpi, actor, alive, rew
+
+
+def _collect_pv_hc(policy_fn, key: Array, batch_size: int):
+    """Run batch_size games with an hc policy_fn; emit (1+W)-row steps.
+
+    Returns (cm, hd, labels, pi, legal, v_mask, p_mask) — the hc
+    contract of the module docstring. Row 0 of every step is the
+    true-state row (v_mask), rows 1..W the per-world rows (p_mask).
+    """
+    keys = jax.random.split(key, batch_size)
+    cm, hd, pi, legal, wcm, whd, wpi, actor, alive, rew = jax.vmap(
+        functools.partial(_play_one_pv_hc, policy_fn)
+    )(keys)
+    labels = jnp.take_along_axis(
+        rew[:, jnp.newaxis, :],   # (B, 1, 4)
+        actor[..., jnp.newaxis],  # (B, T, 1)
+        axis=-1,
+    ).squeeze(-1)                 # (B, T)
+
+    W = wpi.shape[2]
+    R = 1 + W
+    cm_rows = jnp.concatenate([cm[:, :, None], wcm], axis=2)   # (B,T,R,36,12)
+    hd_rows = jnp.concatenate([hd[:, :, None], whd], axis=2)   # (B,T,R,20)
+    pi_rows = jnp.concatenate([pi[:, :, None], wpi], axis=2)   # (B,T,R,43)
+    # One outcome and one info-set legal mask per step, shared by its rows.
+    y_rows = jnp.broadcast_to(labels[:, :, None], labels.shape + (R,))
+    legal_rows = jnp.broadcast_to(legal[:, :, None], cm.shape[:2] + (R, NUM_ACTIONS))
+    is_true_row = jnp.arange(R) == 0                           # (R,)
+    v_mask = alive[:, :, None] & is_true_row
+    p_mask = alive[:, :, None] & ~is_true_row
+    return cm_rows, hd_rows, y_rows, pi_rows, legal_rows, v_mask, p_mask
+
+
+def hc_batch_to_pv(batch):
+    """Slice the true-state rows out of an hc batch → legacy PV contract.
+
+    The ctrl arm's view of an hc corpus (same games, same generator; only
+    the target pairing differs): row 0 of every step is exactly the
+    standard collector's (cm, hd, labels, pi, legal, alive) row.
+    """
+    cm, hd, y, pi, legal, v_mask, _ = batch
+    return (cm[:, :, 0], hd[:, :, 0], y[:, :, 0], pi[:, :, 0],
+            legal[:, :, 0], v_mask[:, :, 0])
 
 
 @functools.partial(jax.jit, static_argnames=("batch_size",))

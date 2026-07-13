@@ -256,9 +256,10 @@ def puct_search(
             resampling) — the internal analogue of JTR's `--cheating`.
             Diagnostic only (oracle probes, search-noise floors); not a
             fair player and not a collector.
-        return_visits: Also return the per-tree root visit counts
-            (K, 43) BEFORE aggregation — the per-world teacher signal
-            (hands-conditional-targets probe, log 2026-07-12).
+        return_visits: Also return the per-tree root visit counts and
+            the determinized root states BEFORE aggregation — the
+            per-world teacher signal (hands-conditional targets,
+            log 2026-07-12 / sop gen-11).
 
     Returns:
         (scores, legal): (43,) float32 aggregated root scores and the
@@ -266,8 +267,10 @@ def puct_search(
         summed visit counts, zero on illegal actions. readout="qsum":
         visit-weighted mean Q in points, −inf on actions that are
         illegal or unvisited in every tree (argmax-safe as-is).
-        With return_visits=True: (scores, legal, visits) with visits
-        (K, 43) int32 per-tree root visit counts.
+        With return_visits=True: (scores, legal, visits, det_states)
+        with visits (K, 43) int32 per-tree root visit counts and
+        det_states the (K,)-batched determinized roots each tree
+        searched (the true state K times under cheat=True).
     """
     if readout not in ("visits", "qsum"):
         raise ValueError(f"unknown readout: {readout!r}")
@@ -329,7 +332,7 @@ def puct_search(
         # unvisited children hold Q=0, so N·Q weighting ignores them.
         scores = _qsum_scores(visits, summary.qvalues, legal)
     if return_visits:
-        return scores, legal, visits
+        return scores, legal, visits, det_states
     return scores, legal
 
 
@@ -485,5 +488,116 @@ def make_puct_collect_fn(
 
     def collect_fn(key: Array, batch_size: int):
         return _puct_collect(pv_params, key, batch_size)
+
+    return collect_fn
+
+
+def make_puct_hc_policy_fn(
+    pv_apply,
+    pv_params,
+    *,
+    num_world_rows: int = 4,
+    num_determinizations: int = 16,
+    num_simulations: int = 64,
+    v_scale: float = 100.0,
+    search_variant: str = "muzero",
+    pb_c_init: float = 1.25,
+    dirichlet_fraction: float = 0.0,
+    temperature: float = 1.0,
+):
+    """policy_fn for hands-conditional collection (sop gen-11).
+
+    Same play behavior as make_puct_policy_fn with the standing visits
+    readout (aggregate pi, τ-sampled action), but additionally exposes
+    the per-world teacher signal for the first W = num_world_rows
+    determinizations: policy_fn(state, key) →
+    (action, pi, world_cm, world_hd, world_pi) with
+
+        world_cm : (W, 36, 12)  value_features of world k's root
+        world_hd : (W, 20)
+        world_pi : (W, 43)      tree k's root visits, normalized over
+                                legal — the hands-CONDITIONAL target
+                                paired with world k's features
+
+    The K determinizations are iid samples given the info set, so the
+    first W are an unbiased subset. Visits readout only: per-world
+    visit distributions are the whole point (qsum's per-world signal is
+    a one-hot argmax, and its flat-prior regime is not a collector).
+    """
+    if not 1 <= num_world_rows <= num_determinizations:
+        raise ValueError(
+            f"num_world_rows must be in [1, num_determinizations]; got "
+            f"{num_world_rows} of {num_determinizations}")
+    W = num_world_rows
+
+    def policy_fn(state: GameState, key: Array):
+        k_search, k_sample = jax.random.split(key)
+        scores, legal, visits, det_states = puct_search(
+            state, state.current_player, k_search, pv_params, pv_apply,
+            num_determinizations, num_simulations, v_scale,
+            search_variant=search_variant, pb_c_init=pb_c_init,
+            dirichlet_fraction=dirichlet_fraction,
+            return_visits=True)
+        pi = scores / scores.sum().clip(1.0)
+        if temperature is None:
+            action = jnp.argmax(jnp.where(legal, scores, -jnp.inf))
+        else:
+            logits = jnp.where(
+                legal, jnp.log(scores.clip(1e-9)) / temperature, _ILLEGAL)
+            action = jax.random.categorical(k_sample, logits)
+
+        worlds = jax.tree_util.tree_map(lambda x: x[:W], det_states)
+        world_cm, world_hd = jax.vmap(value_features, in_axes=(0, None))(
+            worlds, state.current_player)
+        wv = jnp.where(legal, visits[:W].astype(jnp.float32), 0.0)
+        world_pi = wv / wv.sum(axis=-1, keepdims=True).clip(1.0)
+        return (action.astype(jnp.int32), pi, world_cm, world_hd, world_pi)
+
+    return policy_fn
+
+
+def make_puct_hc_collect_fn(
+    pv_apply,
+    pv_params,
+    *,
+    num_world_rows: int = 4,
+    num_determinizations: int = 16,
+    num_simulations: int = 64,
+    v_scale: float = 100.0,
+    search_variant: str = "muzero",
+    pb_c_init: float = 1.25,
+    dirichlet_fraction: float = 0.0,
+    temperature: float = 1.0,
+):
+    """collect_fn(key, batch_size) for hands-conditional PUCT self-play.
+
+    The gen-11 generator (sop "gen-11 — hands-conditional targets"):
+    play is identical to make_puct_collect_fn, but each move emits
+    1 + num_world_rows training rows — the true-state row (value label +
+    aggregate pi, for the value head and the ctrl arm) and W per-world
+    rows pairing world k's features with tree k's visit distribution.
+    Returns the hc contract (see jass_selfplay._collect_pv_hc):
+    (cm, hd, labels, pi, legal, v_mask, p_mask), row axis after T.
+    Train with train_pv_model(head_masks=True); slice the ctrl arm out
+    with jass_selfplay.hc_batch_to_pv.
+    """
+    from pgx._src.games.jass_selfplay import _collect_pv_hc
+
+    @functools.partial(jax.jit, static_argnames=("batch_size",))
+    def _puct_hc_collect(params, key: Array, batch_size: int):
+        policy_fn = make_puct_hc_policy_fn(
+            pv_apply, params,
+            num_world_rows=num_world_rows,
+            num_determinizations=num_determinizations,
+            num_simulations=num_simulations,
+            v_scale=v_scale,
+            search_variant=search_variant,
+            pb_c_init=pb_c_init,
+            dirichlet_fraction=dirichlet_fraction,
+            temperature=temperature)
+        return _collect_pv_hc(policy_fn, key, batch_size)
+
+    def collect_fn(key: Array, batch_size: int):
+        return _puct_hc_collect(pv_params, key, batch_size)
 
     return collect_fn

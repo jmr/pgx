@@ -2,17 +2,24 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from pgx._src.games.jass import DECLARE_OFFSET, Game, MODE_SCORES
+from pgx._src.games.jass import DECLARE_OFFSET, Game, MODE_SCORES, value_features
 from pgx._src.games.jass_puct import (
     _pv_eval,
     _qsum_scores,
     _rollout_value,
     make_puct_action_fn,
     make_puct_collect_fn,
+    make_puct_hc_collect_fn,
+    make_puct_hc_policy_fn,
     make_puct_policy_fn,
     puct_action,
+    puct_search,
 )
-from pgx._src.games.jass_selfplay import policy_match, random_action_fn
+from pgx._src.games.jass_selfplay import (
+    hc_batch_to_pv,
+    policy_match,
+    random_action_fn,
+)
 from pgx._src.games.jass_value_net import PolicyValueNet
 
 game = Game()
@@ -109,6 +116,107 @@ def test_puct_collect_fn_contract():
     assert jnp.allclose(jnp.where(alive, pi.sum(-1), 1.0), 1.0, atol=1e-5)
     assert not jnp.any((pi > 0) & ~legal & alive[..., None])
     assert jnp.all(jnp.abs(labels) <= 157)
+
+
+def test_puct_search_return_visits_contract():
+    """return_visits=True → (scores, legal, visits, det_states)."""
+    pv_apply, params = _pv()
+    state = game.init(jax.random.PRNGKey(0))
+    state = game.step(state, jnp.int32(DECLARE_OFFSET))
+    K = 3
+    scores, legal, visits, det_states = puct_search(
+        state, state.current_player, jax.random.PRNGKey(1),
+        params, pv_apply,
+        num_determinizations=K, num_simulations=8, return_visits=True)
+    assert scores.shape == (43,) and legal.shape == (43,)
+    assert visits.shape == (K, 43)
+    assert jnp.array_equal(visits.sum(axis=0), scores.astype(visits.dtype))
+    # det_states are the K searched roots: batched, mover's hand fixed.
+    assert det_states.hands.shape == (K, 4, 36)
+    me = int(state.current_player)
+    assert jnp.all(det_states.hands[:, me] == state.hands[me])
+    assert jnp.all(det_states.current_player == state.current_player)
+    # cheat=True: every "world" is the true state.
+    _, _, _, cheat_states = puct_search(
+        state, state.current_player, jax.random.PRNGKey(1),
+        params, pv_apply,
+        num_determinizations=K, num_simulations=8,
+        cheat=True, return_visits=True)
+    assert jnp.all(cheat_states.hands == state.hands[None])
+
+
+def test_puct_hc_policy_fn_contract():
+    pv_apply, params = _pv()
+    state = game.init(jax.random.PRNGKey(0))
+    state = game.step(state, jnp.int32(DECLARE_OFFSET))
+    W = 2
+    policy_fn = make_puct_hc_policy_fn(
+        pv_apply, params, num_world_rows=W,
+        num_determinizations=3, num_simulations=8)
+    action, pi, wcm, whd, wpi = jax.jit(policy_fn)(state,
+                                                   jax.random.PRNGKey(1))
+    legal = game.legal_action_mask(state)
+    assert bool(legal[action])
+    assert pi.shape == (43,) and jnp.allclose(pi.sum(), 1.0, atol=1e-5)
+    assert wcm.shape == (W, 36, 12)
+    assert whd.shape == (W, 20)
+    assert wpi.shape == (W, 43)
+    # Per-world targets are distributions over the info-set legal actions.
+    assert jnp.allclose(wpi.sum(-1), 1.0, atol=1e-5)
+    assert not jnp.any((wpi > 0) & ~legal)
+    # World features are the ACTING player's perspective: its own hand
+    # (column 0) is identical to the true state's in every world.
+    cm_true, hd_true = value_features(state, state.current_player)
+    assert jnp.all(wcm[:, :, 0] == cm_true[:, 0])
+    assert jnp.all(whd == hd_true)
+
+
+def test_puct_hc_policy_fn_rejects_bad_world_rows():
+    pv_apply, params = _pv()
+    with pytest.raises(ValueError, match="num_world_rows"):
+        make_puct_hc_policy_fn(pv_apply, params,
+                               num_world_rows=5, num_determinizations=4)
+
+
+def test_puct_hc_collect_fn_contract():
+    pv_apply, params = _pv()
+    W = 2
+    collect_fn = make_puct_hc_collect_fn(pv_apply, params,
+                                         num_world_rows=W,
+                                         num_determinizations=2,
+                                         num_simulations=4)
+    B, T, R = 2, 38, 1 + W
+    batch = collect_fn(jax.random.PRNGKey(0), B)
+    cm, hd, y, pi, legal, v_mask, p_mask = batch
+    assert cm.shape == (B, T, R, 36, 12)
+    assert hd.shape == (B, T, R, 20)
+    assert y.shape == (B, T, R)
+    assert pi.shape == (B, T, R, 43)
+    assert legal.shape == (B, T, R, 43)
+    assert v_mask.shape == p_mask.shape == (B, T, R)
+    # Masks: value on the true row only, policy on world rows only, and
+    # both dead past the terminal step.
+    assert not jnp.any(v_mask & p_mask)
+    assert not jnp.any(v_mask[:, :, 1:])
+    assert not jnp.any(p_mask[:, :, 0])
+    alive = v_mask[:, :, 0]
+    assert jnp.all(p_mask[:, :, 1:] == alive[:, :, None])
+    assert jnp.any(alive) and not jnp.all(alive)  # games end inside T
+    # All rows of a step share the info-set legal mask and the outcome.
+    assert jnp.all(legal == legal[:, :, :1])
+    assert jnp.all(y == y[:, :, :1])
+    assert jnp.all(jnp.abs(y) <= 157)
+    # Every trained row's pi is a distribution over legal actions.
+    trained = v_mask | p_mask
+    assert jnp.allclose(jnp.where(trained, pi.sum(-1), 1.0), 1.0, atol=1e-5)
+    assert not jnp.any((pi > 0) & ~legal & trained[..., None])
+    # The true-row slice is exactly the legacy PV contract (ctrl arm).
+    ccm, chd, cy, cpi, clegal, calive = hc_batch_to_pv(batch)
+    assert ccm.shape == (B, T, 36, 12) and chd.shape == (B, T, 20)
+    assert cy.shape == (B, T) and calive.shape == (B, T)
+    assert cpi.shape == clegal.shape == (B, T, 43)
+    assert jnp.all(calive == alive)
+    assert jnp.allclose(jnp.where(calive, cpi.sum(-1), 1.0), 1.0, atol=1e-5)
 
 
 def _batch_states(n, seed=0, past_trump=True):

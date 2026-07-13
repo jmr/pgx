@@ -117,11 +117,11 @@ def main():
             done = s.trick_num >= 9
             k, sk, nk, ak = jax.random.split(k, 4)
 
-            scores, legal, visits = search(s, sk, cheat=False)
+            scores, legal, visits, _ = search(s, sk, cheat=False)
             jsd, hbar, mismatch = disagreement(visits, legal)
 
             if args.null:
-                _, _, nvisits = search(s, nk, cheat=True)
+                _, _, nvisits, _ = search(s, nk, cheat=True)
                 jsd0, _, _ = disagreement(nvisits, legal)
             else:
                 jsd0 = jnp.float32(0.0)

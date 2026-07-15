@@ -2845,3 +2845,53 @@ corpus-refresh bar exists this generation, and is itself the only
 uncontaminated promotion candidate (its raw gate vs gen-10 is fair —
 ctrl is hands-blind by construction). Champion: **unchanged (gen-10)
 pending ctrl.** External gate 4 (JTR) moot for hc-as-agent; deferred.
+
+## 2026-07-15 — gen-11ctrl: the corpus refresh is GONE (−1.0/−1.1 ns vs gen-10) — the ~+2.5/gen crank has fully stopped; gen-11 promotes NOTHING
+
+The control arm of the entry above: same corpus, same games, same arch
+and recipe as every generation since gen-8d_mz — true-state rows only
+(`hc_batch_to_pv`), legacy single-mask training. It answers two
+questions at once: the target-pairing decomposition, and whether the
+~+2.5/gen corpus-refresh gain still exists. **It does not.**
+
+**Training** (full 20k, 5211 s — the legacy rate, ~1/5 the hc arm):
+clean, NO U-curve, train ≈ eval throughout; final holdout v **0.0637**,
+p 0.5069 (aggregate targets — the historically comparable CE class).
+The pre-registered hc-vs-ctrl value comparison, on the IDENTICAL
+holdout games: **hc 0.0627 vs ctrl 0.0637** — the hc arm's 4× policy
+rows cost the value channel nothing (a hair better, if anything); the
+per-head loss normalization held the balance as designed.
+
+**Gate — raw-vs-raw vs gen-10** (fp 29783.97 vs 29781.71; 300 pairs,
+seeds 0/2; uncontaminated — ctrl trains on the blindness-inducing
+pairing and is hands-blind by construction):
+
+| seed | Δ/game | t | p | verdict |
+|:--|:--|:--|:--|:--|
+| 0 | **−1.0** | −0.98 | 0.3271 | ns |
+| 2 | **−1.1** | −0.91 | 0.3630 | ns |
+
+**The refresh bar this generation is ZERO.** Historical same-recipe
+generator advances: gen-9 +2.8/+4.2, gen-10 (= 10-ctrl) +2.5/+2.4 —
+now the gen-10-generated corpus trains a net arena-EQUAL to gen-10.
+The 2026-07-11 prediction ("the ~+2.5/gen corpus refresh just
+reshuffles the same information") undershot: even the reshuffle gain
+is gone. Combined with capacity dead (10a/b/c), coverage dead (128k
+wash), and the operator saturated on both searchers (2026-07-07),
+**iterating self-play in ANY form now pays zero. NO PROMOTION —
+champion stays gen-10.**
+
+This also closes the decomposition cleanly: with the refresh bar at 0,
+hc's fair-raw −0.1/−3.9 and ctrl's −1.0/−1.1 pin BOTH gen-11 arms at
+gen-10 level — the target-pairing delta on fair footing is ≈ 0, as the
+entry above concluded from the hc side alone. (Direct hc-fair-vs-ctrl
+arena superfluous; ctrl hidden-hand probe not run — expected ~0.003,
+optional receipt.) Artifacts kept: `pv_gen11hc.msgpack` (fp 29962.42 —
+the belief-model candidate), `pv_gen11ctrl.msgpack` (fp 29783.97).
+
+**gen-11 net outcome: two negatives that sharpen to one law.**
+Strength = 12.6·q per game; self-play iteration can no longer raise
+the conditional-skill factor (plateau) and never touched q. The only
+live internal lever is RAISING q — belief-weighted determinization,
+for which gen-11hc is the free likelihood model (plan NEXT,
+2026-07-15). Exact endgame targets queued behind it.

@@ -2739,3 +2739,109 @@ Full oracle arc now complete (all 2026-07-12/13, gen-9, JTR commit
 hands-blind by the marginal target) → search path worth +12.6·q,
 linear → teacher signal for hands-conditional targets large (JSD
 0.24 vs 0.0000 floor). The two live levers are quantified end to end.
+
+## 2026-07-15 — gen-11hc: the pairing binds AT TEACHER LEVEL (probe KL 0.003→0.229 ≈ teacher's 0.24) but converts to ZERO at fair deployment — information was never the constraint, WORLD MASS is
+
+The hands-conditional-targets experiment (decision 2026-07-13, spec →
+jass_sop.md "gen-11"), run end to end 2026-07-13→15. Verdict up front:
+**the cleanest possible negative — the student learned essentially the
+ENTIRE hands-conditional signal the teacher had to give, and it is
+worth nothing under uniform world sampling.** Exactly the dose-response
+arithmetic (Δ = 12.6·q with q ≈ 0 at fair inference), now demonstrated
+on a trained net rather than an oracle knob.
+
+**Stage 1 — collection (2026-07-13/14).** 32×2048 hc corpus from
+CHAMP=gen-10 (10-ctrl), standing muzero recipe (K=16×64, pb_c=1.25,
+dirichlet 0, τ=1), W=4 world rows/step via `make_puct_hc_collect_fn`.
+Pre-registered profile check: the hc collector's VMEM knee moved DOWN
+one step — B=2/4/8 = 678/**547**/rising ms/game vs the standing
+collector's B=8@615 — the ~5× emitted rows shrink the optimal batch;
+hc search overhead ≈ zero. **Per-chip B=4 is the hc collection
+standard.** Operational: raw hc shards are ~260 MB (5 rows/step ×
+~670 B/row) and colab's Drive FUSE writes at ~0.8 MB/s (314 s/shard,
+confirmed API-bound: single-blob write didn't help) — **zlib level-6
+compression is the fix (~20:1 on the sparse bool/f32 rows; level 6
+BEATS level 1 once the pipe is priced in): 29 s/write, 174 s/batch,
+corpus in ~1.5 h.** Shards + monolith stored compressed
+(`corpus_puct_hc_gen10_32x2048_k16s64w4.pickle.z`).
+
+**Stage 2 — training.** `train_pv_model(head_masks=True)`, 128/2/4,
+full 20k, standing recipe (holdout = 32nd batch; 76,610 value rows /
+306,440 policy rows). **NO U-curve, train ≈ eval throughout** (final
+19.9k: eval 0.4987, v 0.0627, p 0.4359, train 0.4914); ~253 s/200
+epochs ≈ 5× the legacy rate (5× rows/step), 24,245 s total. The v
+floor 0.0627 sits at the gen-9/10 level; p-CE is on per-world targets
+over world features — **comparable to NOTHING historical** (SOP
+warning stands). Weights: `pv_gen11hc.msgpack` (fp 29962.42).
+
+**Gate 1 — hidden-hand probe: PASSED AT THE CEILING.** 128 games × 8
+worlds, 3456 positions (`jass_probes.hidden_hand_probe`; the script is
+now a thin wrapper). Side by side with gen-9 and the teacher signal:
+
+| metric | gen-9 (2026-07-12) | gen-11hc | teacher (JSD probe) |
+|:--|:--|:--|:--|
+| policy KL(true‖world), mean | 0.003 | **0.2291** (median 0.101, p90 0.615) | JSD 0.241 |
+| argmax flips across worlds | 4.1% | **23.3%** | 25.4% (world argmax ≠ aggregate) |
+| policy entropy (true world) | 0.80 | 0.59 | — |
+| value std across worlds | 28.5 pts | 29.0 pts | — |
+
+~76× the blind baseline, ≈ the full teacher signal (pre-registration
+demanded only "well off 0.003, toward not necessarily to 0.24"); trick
+profile mirrors the teacher's (flat ~0.24–0.30 through trick 5, dip at
+7 as worlds collapse). Value head untouched, as designed. **The
+pairing bound completely.**
+
+**Oracle-track arena — the trap we almost fell into.** Standard
+raw-vs-raw vs gen-10-ctrl (fp 29962.42 vs 29781.71), 300 pairs,
+seeds 0/2: **+26.9 (t=19.1) / +24.7 (t=17.6), both p=0.0000***. ⚠ NOT
+A RAW GATE: the internal raw arena feeds both nets `value_features` of
+the TRUE state — harmless for every previous (hands-blind, KL 0.003)
+net, but gen-11hc is the first challenger that can READ the opponent
+columns, so this is a cheating eval for one side. Magnitude check:
++25–27 internal ≈ +9–13 external at the usual ~2–3:1 ≈ the +12.6
+oracle bound — this number is the oracle pool converted from the
+search path to the raw path, i.e. the mechanism receipt, not deployed
+strength. **Standing rule from here: raw-vs-raw is oracle-contaminated
+for any hands-aware policy; fair raw = world-averaged inference.**
+
+**Fair deployment — WASH.**
+- **Fair PUCT** (muzero K=16×64 both sides, determinized states → fair
+  by construction; the deployed config): **+0.5 ns (p=0.71)** vs
+  gen-10-ctrl (seed 0; blunt instrument — PUCT compressed gen-5b's
+  +12–16 raw to +2.2 ns — but no re-opened operator margin either).
+- **Fair raw** (hc policy marginalized over K=16 sampled worlds —
+  argmax of the world-averaged softmax — vs gen-10 raw τ=0.05;
+  300 pairs, seeds 0/2): **−0.1 ns (p=0.96) / −3.9 (p=0.0028)**.
+  Wash to slightly negative: the K=16 Monte-Carlo average is a noisier
+  estimator of the same marginal the ctrl-style target trains
+  directly. (K=64 variance check not run; TODO the world-averaged
+  action fn is inline colab — move into pgx per the thin-wrapper
+  convention if it becomes a standing eval mode.)
+
+**Reading.** The self-confirmation-loop hypothesis — hands-BLIND
+priors inside each determinized tree are the binding constraint — is
+**dead as a strength lever at this budget**: the priors are now
+hands-conditional at teacher level inside every tree and the operator
+margin did not re-open (+0.5 ns). The value head's ±28-pt
+hands-awareness was evidently already carrying the within-world
+adaptation. What survives is the dose-response law: strength =
+12.6·q, and gen-11 raised the CONDITIONAL quality while leaving
+q ≈ 1/|consistent worlds| untouched. **The lever is world mass, not
+world-conditional skill.**
+
+**Fork (pre-registered 2026-07-12): "(2)+(3) wash → hands-conditional
+info doesn't convert" FIRES** — with the sharpened corollary that the
+next move is the plan's queued **belief-weighted determinization**,
+which is now nearly free exactly as the sequencing-synergy argument
+predicted: gen-11hc IS the likelihood model. Reweight the K sampled
+worlds by the hc policy's likelihood of opponents' OBSERVED moves
+(particle-filter style), re-run the fair arenas — **a measurement-only
+experiment: no collection, no training.** Exact endgame targets stay
+queued behind it.
+
+**Pending:** gen-11ctrl (same corpus, true rows via `hc_batch_to_pv`,
+legacy recipe) — decomposes refresh-vs-pairing, checks the ~+2.5
+corpus-refresh bar exists this generation, and is itself the only
+uncontaminated promotion candidate (its raw gate vs gen-10 is fair —
+ctrl is hands-blind by construction). Champion: **unchanged (gen-10)
+pending ctrl.** External gate 4 (JTR) moot for hc-as-agent; deferred.

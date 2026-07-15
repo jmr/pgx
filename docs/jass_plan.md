@@ -9,7 +9,51 @@ markers as work completes. **Dated experiment results and diagnostics live in
 `docs/jass_experiment_log.md`** (append new results there; this file keeps
 conclusions and pointers). The per-generation procedure is `docs/jass_sop.md`.
 
-## Status snapshot (2026-07-13)
+## Status snapshot (2026-07-15)
+
+**CHAMPION: gen-10 (= 10-ctrl) — UNCHANGED. gen-11 promotes NOTHING.**
+
+**gen-11 = hands-conditional targets: RAN 2026-07-13→15, RESOLVED —
+the cleanest negative of the project (full arc → log 2026-07-15, two
+entries).** The student learned essentially the ENTIRE teacher signal
+and it converts to zero at fair deployment:
+- **Mechanism bound at TEACHER LEVEL:** hidden-hand probe policy KL
+  0.003 → 0.229 ≈ the teacher's across-world JSD 0.241; argmax flips
+  23.3% ≈ the teacher's 25.4%. Oracle-track raw +26.9/+24.7*** vs
+  gen-10 ≈ the +12.6 oracle bound through the internal conversion.
+  ⚠ **Standing rule:** internal raw-vs-raw feeds TRUE states and is
+  oracle-contaminated for any hands-aware policy; fair raw =
+  world-averaged inference (K-determinization softmax average).
+- **Fair deployment ZERO:** fair PUCT (muzero 16×64) +0.5 ns; fair
+  raw −0.1/−3.9 vs gen-10. The blind-priors self-confirmation
+  hypothesis is dead as a strength lever at this budget — the value
+  head's ±28-pt hands-awareness already carried the within-world
+  adaptation. **Information was never the constraint; WORLD MASS is**
+  (strength = 12.6·q, and uniform sampling has q ≈ 0).
+
+**THE SELF-PLAY CRANK IS FULLY STOPPED (2026-07-15): the corpus
+refresh is GONE.** gen-11ctrl — the pure refresh arm, standing recipe
+on the fresh gen-10 corpus — gates **−1.0/−1.1 ns vs gen-10**, against
+the historical ~+2.5/gen (gen-9 +2.8/+4.2, gen-10 +2.5/+2.4). With
+capacity, coverage, and both search operators already dead
+(2026-07-07/11), iterating self-play in ANY form now pays zero.
+
+**NEXT (DECIDED 2026-07-15): BELIEF-WEIGHTED DETERMINIZATION as the
+hc-likelihood probe — measurement-only, no collection, no training.**
+Weight candidate worlds by the gen-11hc policy's likelihood of the
+opponents' OBSERVED moves (particle-filter style) and re-run the fair
+arenas. The dose-response law guarantees the pool (+12.6·q, LINEAR —
+no threshold to clear, partial belief quality pays partially), and the
+sequencing-synergy bet paid exactly as designed: **gen-11hc IS the
+belief model** (`pv_gen11hc.msgpack`, probe KL ≈ teacher signal), so
+no separate belief net and no marginals→joint sampling problem.
+Queued behind it: **exact endgame targets** (unchanged); capacity /
+different-operator (unchanged, lowest odds).
+
+Measurement unchanged: gate vs gen-10; POWERFUL (net trump on) stays
+the external yardstick.
+
+## Superseded snapshot (2026-07-13)
 
 **CHAMPION: gen-10 (= 10-ctrl, `PolicyValueNetAttn` 128/2/4 on the
 fresh gen-9 corpus) — PROMOTED 2026-07-10, raw +2.5/+2.4 vs gen-9,

@@ -174,9 +174,21 @@ Diagnostics:
   raw. Large + while PUCT-vs-PUCT is flat = the search is masking real policy
   gains (this is now the standing gate, above).
 
-## gen-11 — hands-conditional policy targets (2026-07-13, CURRENT)
+## gen-11 — hands-conditional policy targets (2026-07-13, DONE 2026-07-15 — mechanism bound at TEACHER level, fair deployment ZERO, ctrl refresh ZERO; NO promotion, champion stays gen-10; full arc → log 2026-07-15)
 
-**Decision + justification → plan NEXT (2026-07-13); pre-registered
+**Gate outcomes (2026-07-15):** (1) hidden-hand probe **PASSED AT THE
+CEILING** — KL 0.003→0.229 ≈ teacher JSD 0.241, flips 23.3% ≈ 25.4%;
+(2) fair arenas **WASH** — fair PUCT +0.5 ns, fair raw (16-world-
+averaged softmax) −0.1/−3.9 vs gen-10; ⚠ the pre-registered raw gate
+is oracle-contaminated for hands-aware nets (internal raw arenas feed
+TRUE states; the +26.9/+24.7*** reading is the oracle track, not
+deployed strength); (3) operator did NOT re-open; (4) external moot.
+Plus: **ctrl gates −1.0/−1.1 ns vs gen-10 — the ~+2.5/gen corpus
+refresh is GONE.** Fork fired: next = belief-weighted determinization
+as the hc-likelihood probe (plan NEXT 2026-07-15); gen-11hc
+(`pv_gen11hc.msgpack`) is the likelihood model.
+
+**Decision + justification → plan (2026-07-13); pre-registered
 gates → log 2026-07-12 (teacher-signal entry). Evidence: log
 2026-07-12/13 (hidden-hand probe, teacher-signal probe, oracle arc).**
 

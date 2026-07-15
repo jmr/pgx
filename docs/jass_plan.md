@@ -38,13 +38,17 @@ the historical ~+2.5/gen (gen-9 +2.8/+4.2, gen-10 +2.5/+2.4). With
 capacity, coverage, and both search operators already dead
 (2026-07-07/11), iterating self-play in ANY form now pays zero.
 
-**NEXT (DECIDED 2026-07-15): BELIEF-WEIGHTED DETERMINIZATION as the
-hc-likelihood probe — measurement-only, no collection, no training.**
-Weight candidate worlds by the gen-11hc policy's likelihood of the
-opponents' OBSERVED moves (particle-filter style) and re-run the fair
-arenas. The dose-response law guarantees the pool (+12.6·q, LINEAR —
-no threshold to clear, partial belief quality pays partially), and the
-sequencing-synergy bet paid exactly as designed: **gen-11hc IS the
+**NEXT (DECIDED 2026-07-15): BELIEF-WEIGHTED DETERMINIZATION, staged —
+first the offline BELIEF-QUALITY PROBE (procedure → jass_sop.md
+"Belief-quality probe"), measurement-only, no collection, no
+training.** Particle-filter self-play diagnostic: weight candidate
+worlds by the gen-11hc policy's likelihood of the opponents' OBSERVED
+moves, and measure the achievable world mass (effective q, placement
+overlap, by trick) against the dose-response price: payoff ≈ 12.6·q̄.
+Pre-registered bar: q̄ ≥ ~0.2 (≈ +2.5/game) → build the reweighted
+sampling into the searchers and re-run the fair arenas; q̄ ≲ 0.05 →
+route dead, go to endgame targets without paying for search plumbing.
+The sequencing-synergy bet paid exactly as designed: **gen-11hc IS the
 belief model** (`pv_gen11hc.msgpack`, probe KL ≈ teacher signal), so
 no separate belief net and no marginals→joint sampling problem.
 Queued behind it: **exact endgame targets** (unchanged); capacity /

@@ -174,6 +174,61 @@ Diagnostics:
   raw. Large + while PUCT-vs-PUCT is flat = the search is masking real policy
   gains (this is now the standing gate, above).
 
+## Belief-quality probe — hc-likelihood particle filter (2026-07-15, CURRENT — the gate on belief-weighted determinization)
+
+**Decision → plan NEXT (2026-07-15). This runs BEFORE any search
+integration: it prices the belief lever offline. Cost: an afternoon of
+pgx code + CPU/TPU minutes. No collection, no training.**
+
+**Principle.** Strength = 12.6·q per game (dose-response, LINEAR, log
+2026-07-13); uniform world sampling has q ≈ 0; gen-11 proved
+world-conditional skill without world mass is worth ZERO. The one
+artifact that can concentrate mass is gen-11hc
+(`pv_gen11hc.msgpack`, fp 29962.42): its policy is world-conditional
+at teacher level (probe KL 0.229), so Bayes-invert it —
+`P(world | observed opponent moves) ∝ Π P(move | world)` with the
+likelihood read off the hc policy evaluated on the candidate world
+FROM THE OPPONENT'S SEAT. No card-prediction head, no
+marginals→joint sampling (the thesis-era belief-net mini-project
+stays sidestepped).
+
+**Design (all pgx, self-play, true world known):** run a particle
+filter alongside self-play games — N candidate worlds per player
+(sampled by `sample_determinization` at deal... particles must respect
+revealed void constraints as the game evolves; simplest correct v0:
+RESAMPLE N consistent worlds fresh at each decision and score each on
+the FULL history of that game's opponent moves so far). For each
+candidate world w and each past opponent decision t: reconstruct the
+state at t under w (public history + w's hands), evaluate the hc
+policy from the mover's seat, accumulate
+`log L(w) += log P(observed move_t | w)`. At every decision of the
+probed player report, vs the uniform 1/N baseline:
+- **effective q**: normalized weight mass on the true world (and
+  mass on worlds within Hamming distance d of it, d = misplaced
+  hidden cards — the partial-overlap caveat, log 2026-07-13 pt 3);
+- **placement accuracy**: weight-averaged fraction of hidden cards
+  placed in the correct opponent hand;
+- both **by trick** (constraints accumulate; belief should sharpen
+  late — but late is also where worlds matter least, trick-7 JSD dip).
+
+**Bar (pre-registered):** the payoff estimate is 12.6·q̄ per game.
+- q̄ (or its overlap-adjusted equivalent) **≥ ~0.2** → predicted
+  ≥ ~+2.5/game (one old-generation step) → BUY the integration:
+  likelihood-weighted world sampling in `puct_search`/fair-raw,
+  re-run the fair arenas vs gen-10, gate as usual.
+- q̄ **≲ 0.05** → the likelihood route is dead at this net/budget —
+  do NOT build search plumbing; next = exact endgame targets
+  (plan queue).
+- In between: check the trick profile before deciding (mass early
+  beats mass late).
+
+**Conventions:** library fn in `pgx/_src/games/jass_probes.py` (e.g.
+`belief_quality_probe(...)`) + thin script/colab cell — scripts are
+wrappers (2026-07-15). While in that file: the world-averaged fair-raw
+action fn from the gen-11 arenas is still inline colab — move it into
+pgx (`make_fair_raw_action_fn` or similar) alongside; it's the
+standing fair eval mode for any hands-aware net from now on.
+
 ## gen-11 — hands-conditional policy targets (2026-07-13, DONE 2026-07-15 — mechanism bound at TEACHER level, fair deployment ZERO, ctrl refresh ZERO; NO promotion, champion stays gen-10; full arc → log 2026-07-15)
 
 **Gate outcomes (2026-07-15):** (1) hidden-hand probe **PASSED AT THE

@@ -222,12 +222,23 @@ probed player report, vs the uniform 1/N baseline:
 - In between: check the trick profile before deciding (mass early
   beats mass late).
 
-**Conventions:** library fn in `pgx/_src/games/jass_probes.py` (e.g.
-`belief_quality_probe(...)`) + thin script/colab cell — scripts are
-wrappers (2026-07-15). While in that file: the world-averaged fair-raw
-action fn from the gen-11 arenas is still inline colab — move it into
-pgx (`make_fair_raw_action_fn` or similar) alongside; it's the
-standing fair eval mode for any hands-aware net from now on.
+**Tooling (BUILT 2026-07-15, change `wtttptqq`):**
+`belief_quality_probe` + `print_belief_quality_report` in
+`pgx/_src/games/jass_probes.py`, thin wrapper
+`scripts/jass_belief_quality_probe.py` (`--weights pv_gen11hc.msgpack
+--games --particles --seed`). Implementation notes: true world is
+injected as particle 0, so the uniform baseline is 1/(N+1); past
+states under a candidate world need no replay (hands at t = world
+hands ∪ cards publicly played in [t,T)); actor defaults to the hc net
+raw τ=1 = matched likelihood = the route's CEILING (pass
+`actor_action_fn` for mismatched-actor arms). ⚠ Run the `--blind` arm
+too (constant-logits likelihood, same actor): the LEGAL-MOVE SET is
+world-dependent evidence (1/n_legal + illegal-move exclusion), and
+with a random-init net it accounts for ~all concentration — hc's
+contribution = hc arm minus blind arm. `make_fair_raw_action_fn`
+(world-averaged softmax, the standing fair eval mode for hands-aware
+nets) is now in `jass_probes.py` too — the inline-colab TODO is
+closed.
 
 ## gen-11 — hands-conditional policy targets (2026-07-13, DONE 2026-07-15 — mechanism bound at TEACHER level, fair deployment ZERO, ctrl refresh ZERO; NO promotion, champion stays gen-10; full arc → log 2026-07-15)
 

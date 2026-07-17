@@ -51,12 +51,14 @@ convert q; the mechanism is search — world-dependent dynamics + the
 hands-aware value head). Implied realized q̄ ≈ 0.33: the dose-response
 law held through deployment at the priced mismatched-actor discount.
 First internal strength gain since gen-10, play-time only — no
-collection, no training. **NEXT: (1) external check vs POWERFUL
-(harness note in the SOP section — the public trajectory is
-observable from outside, mirror-state diffs suffice); (2) then decide
-belief-weighted COLLECTION: the collector is PUCT, so the pass
-re-opens gen-12 — every plateau negative (capacity, coverage, refresh,
-gen-11) was measured with a q≈0 teacher.** Queued behind: **exact
+collection, no training. **NEXT: (1) external check vs POWERFUL —
+harness BUILT 2026-07-17 late (JassTheRipper-2 commit `rtmtvklk`:
+`PgxBeliefFilter` + `--pgx-belief1` flag; gen-11hc exported with NO
+export-script changes, fp + parity verified; exact command + smoke
+receipt in the SOP "External harness BUILT" block) — just run it;
+(2) then decide belief-weighted COLLECTION: the collector is PUCT, so
+the pass re-opens gen-12 — every plateau negative (capacity, coverage,
+refresh, gen-11) was measured with a q≈0 teacher.** Queued behind: **exact
 endgame targets** (unchanged); capacity / different-operator
 (unchanged, lowest odds).
 

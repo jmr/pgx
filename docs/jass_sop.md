@@ -192,6 +192,39 @@ trajectory whose opponent "hands" are their not-yet-played cards is
 sufficient — the filter reads hand DIFFS (cards played per player)
 and public fields only, all observable from outside.
 
+**External harness BUILT (2026-07-17 late, JassTheRipper-2 commit
+`rtmtvklk` "MCTS: belief-weighted determinization"). Ready to run.**
+- **Export needed NO changes:** gen-11hc is the standing 128/2/4 attn
+  recipe, same (cm, hd) contract; arch auto-inferred from the npz.
+  Exported to `JassTheRipper-2/src/main/resources/models/pv_gen11hc/
+  export` from `../jass-models/pv_gen11hc.msgpack` (fp 29962.42
+  verified = sum |w|); JAX↔TF parity max |Δlogits| 1.6e-5.
+  gen-10 export copied to `models/pv_gen10-ctrl_s128/export`.
+- **JTR-side port** (`PgxBeliefFilter` + `JassBoard.setBeliefWorlds`):
+  N=32 void-consistent worlds via the standard `CardKnowledgeBase`
+  sampler, hc log-likelihood by replaying the public record on a
+  shadow session (hands at step t = world hands now ∪ played-card
+  suffix — no per-world game replay), log-softmax over the LEGAL card
+  logits (illegal observed move ⇒ −1e9, the legality channel), root
+  determinizations drawn ∝ weights with replacement. Two documented
+  divergences from the pgx filter, both priced ~nil: the two
+  trump-phase decisions are not scored (JTR's move record is cards
+  only; trump-only q̄ 0.039), and trump-phase determinizations stay
+  uniform.
+- **Run** (from JassTheRipper-2, after `./gradlew installDist`):
+  `build/install/JassTheRipper/bin/JassTheRipperArena
+  --name1=belief-gen10 --strength1=<level>
+  --pgx-model1=src/main/resources/models/pv_gen10-ctrl_s128/export
+  --pgx-policy1 --pgx-trump1
+  --pgx-belief1=src/main/resources/models/pv_gen11hc/export
+  --name2=POWERFUL --strength2=POWERFUL --mode=RUNS --games=<n>`
+  (knobs `--belief-particles1`, `--belief-mix1` default to the gate
+  config 32 / 0). Baseline arm = same command without `--pgx-belief1`,
+  per the standing vs-POWERFUL protocol (net trump on).
+- **Smoke receipt** (2 games, FAST): both nets load, filter runs each
+  card decision, ESS 32 at the first decision (uniform, empty
+  history) → ~1.2–2.2 mid-game — the pgx gate saw ~2.5.
+
 **Decision → plan NEXT (2026-07-17); priced by the probe (q̄ 0.56
 ceiling, log 2026-07-17) and the dose-response law (12.6·q, log
 2026-07-13). All in pgx — JTR stays the untouched external yardstick.**

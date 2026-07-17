@@ -2941,3 +2941,56 @@ normalization + illegal-observed-move exclusion.)
 vs gen-10, gate as usual.** Ceiling math if matched-level q survived
 deployment: +7/game ≈ 3 old generations; even the blind channel alone
 would be the largest single lever left.
+
+## 2026-07-17 — Belief gate: PUCT arm PASSES (+2.8/+5.3, pooled +4.1 ***) — first internal strength gain since gen-10; raw arm NULL (a hands-blind policy cannot convert q)
+
+The SOP integration gate (tooling `zlnvsxzz`…`vqupzyvv`), colab TPU:
+challenger = belief-weighted agent (N=32 particles, λ=0, gen-11hc
+fp 29962.42 as likelihood net), baseline = gen-10 uniform-sampling,
+gen-10 as the search/policy net on BOTH sides. 300 swapped-deal pairs
+per seed, seeds 0/2, pre-registered knobs — run as specified.
+
+**PUCT arm** (fair PUCT, muzero K=16×64 both sides; belief resamples
+the K root worlds ∝ weights via `puct_search(det_states=…)`):
+
+| seed | Δ/game | t | p | sign (pairs) |
+|:--|:--|:--|:--|:--|
+| 0 | **+2.8** | +1.91 | 0.0572 ns | 147W/120L, p=0.11 |
+| 2 | **+5.3** | +3.68 | **0.0003 \*\*\*** | 171W/102L, p<1e-4 |
+| pooled (600 pairs) | **+4.1** | ≈+3.9 | **<1e-4** | 318W/222L |
+
+**Raw arm** (belief fair-raw argmax vs gen-10 raw τ=0.05): seed 0
+−1.3 (p=0.091 ns), seed 2 −0.3 (p=0.78 ns) — null.
+
+**Readings.**
+1. **The belief lever converts through SEARCH.** Pooled +4.1/game ⇒
+   implied realized q̄ ≈ 4.1/12.6 ≈ 0.33 — right where it should sit:
+   above the net-free legality channel (0.17 → +2.1) and below the
+   matched-actor ceiling (0.56 → +7.1), the priced-in mismatched-actor
+   discount (deployed opponents are gen-10-PUCT-style, not hc-raw).
+   The dose-response law keeps paying: this is the largest single
+   arena gain since the gen-9 era, from a play-time-only change — no
+   collection, no training.
+2. **The raw null is the gen-11 mechanism finding, replayed.** gen-10's
+   policy head is hands-blind (hidden-hand probe KL 0.003, log
+   2026-07-12): its per-world softmax barely varies across worlds, so
+   the belief-weighted mixture ≈ the uniform mixture ≈ raw play —
+   there is no mechanism for q to change the move. Search converts q
+   because the tree plays out world-dependent DYNAMICS and reads the
+   hands-aware VALUE head (std 28.5 pts). Consistent, not surprising;
+   the deployed raw config gains nothing from belief.
+3. Seed 0 is a hair over the line alone (p=0.057) but same-signed;
+   seed 2 and the pooled read are unambiguous. Pre-registered clause
+   ("any significant + at these harnesses promotes") fires.
+4. Cost: ~1.3 s/game (belief PUCT arena, both-sides evaluation);
+   the filter is not the bottleneck at N=32.
+
+**Decision: GATE PASSED — belief-weighted PUCT (K=16×64, N=32, λ=0,
+gen-11hc likelihood) is the new best INTERNAL play config. Champion
+NET unchanged (gen-10); the raw deployed config unchanged (arm null).
+Per the standing sequence, NEXT = the external check vs POWERFUL.**
+Behind it, a fork the pass re-opens: the collector is PUCT — a
+belief-weighted collector raises teacher quality for the first time
+since the plateau (every gen-11 negative was measured at q≈0 search),
+so a gen-12 collection attempt becomes arguable again. Decide after
+the POWERFUL read. Exact endgame targets stay queued.

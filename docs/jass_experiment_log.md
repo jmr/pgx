@@ -2895,3 +2895,49 @@ the conditional-skill factor (plateau) and never touched q. The only
 live internal lever is RAISING q — belief-weighted determinization,
 for which gen-11hc is the free likelihood model (plan NEXT,
 2026-07-15). Exact endgame targets queued behind it.
+
+## 2026-07-17 — Belief-quality probe: q̄ = 0.56, ~3× the buy bar — BUY the integration; legality channel alone worth q̄ = 0.17
+
+The pre-registered probe (spec 2026-07-15, SOP "Belief-quality
+probe"; tooling `wtttptqq`+`pvkkzpls`) run in colab TPU: gen-11hc
+(fp 29962.42) as likelihood model AND actor (raw τ=1 — the MATCHED
+setting: inverting the actor's own policy gives the exact posterior,
+so this is the route's ceiling), 128 games × 32+1 particles, seed 0,
+4792 probed decisions, 21 s + 3.5 s (blind arm).
+
+| arm | q̄ overall | card-play | 12.6·q̄ | mass d≤2 | place w/u | ESS |
+|:--|:--|:--|:--|:--|:--|:--|
+| hc likelihood | **0.5639** | 0.5848 | **+7.1/game** | 0.626 vs 0.190 | 0.502 / 0.397 | 7.9/33 |
+| blind (legality only) | 0.1662 | 0.1716 | +2.09/game | 0.248 vs 0.190 | 0.420 / 0.397 | 23.4/33 |
+
+(uniform baseline 1/33 = 0.0303; blind arm = same games, constant-
+logits likelihood — evidence from the legal-move set alone: 1/n_legal
+normalization + illegal-observed-move exclusion.)
+
+**Readings.**
+1. **Bar cleared ~3× over** (pre-registered: q̄ ≥ 0.2 buy, ≤ 0.05
+   dead). The in-between/trick-profile clause never engages.
+2. **Mass arrives EARLY, where worlds matter**: q̄ by trick 0.27 (t0)
+   → 0.47 (t1) → 0.61 (t2), peak 0.66 (t4) — front-loaded, before the
+   trick-7 relevance dip. Trump phase ≈ baseline (0.039): opponent
+   trump choices alone say little under this net.
+3. **The legality channel is a free +2/game-equivalent**: no net, pure
+   Bayes over legal-move constraints, q̄ 0.17 ≈ 2/3 of an old
+   generation. hc's policy shape adds +0.40 q on top. Fallback exists
+   if net-likelihood plumbing is awkward.
+4. **Consistency receipts**: blind trump row exactly uniform (0.0303,
+   ESS 33.0 — the mask is public in phase 0); true particle never
+   excluded.
+5. **Caveats**: (a) matched-actor CEILING — deployment opponents
+   (gen-10-style PUCT / JTR) are differently distributed, realized q̄
+   will be lower; the fair arenas vs gen-10 remain the gate. (b) ESS
+   dips to ~2.4–2.8 mid-game: the posterior lives on a few sampled
+   worlds — belief-weighted K=16 sampling will duplicate trees
+   (duplication IS the q mass, but the searcher should sample
+   with replacement from weights, not deduplicate).
+
+**Decision: build likelihood-weighted world sampling into
+`puct_search`/fair-raw (the SOP fork's buy branch), then fair arenas
+vs gen-10, gate as usual.** Ceiling math if matched-level q survived
+deployment: +7/game ≈ 3 old generations; even the blind channel alone
+would be the largest single lever left.

@@ -145,6 +145,39 @@ def test_puct_search_return_visits_contract():
     assert jnp.all(cheat_states.hands == state.hands[None])
 
 
+def test_puct_search_det_states_override():
+    """det_states replaces the sampler: true-state worlds ≡ cheat=True."""
+    pv_apply, params = _pv()
+    state = game.init(jax.random.PRNGKey(0))
+    state = game.step(state, jnp.int32(DECLARE_OFFSET))
+    K = 3
+    true_worlds = jax.tree_util.tree_map(
+        lambda x: jnp.broadcast_to(x[None], (K, *x.shape)), state)
+    s1, l1 = puct_search(state, state.current_player, jax.random.PRNGKey(1),
+                         params, pv_apply, num_determinizations=K,
+                         num_simulations=8, det_states=true_worlds)
+    s2, l2 = puct_search(state, state.current_player, jax.random.PRNGKey(1),
+                         params, pv_apply, num_determinizations=K,
+                         num_simulations=8, cheat=True)
+    assert jnp.array_equal(s1, s2) and jnp.array_equal(l1, l2)
+
+
+def test_puct_search_det_states_validation():
+    pv_apply, params = _pv()
+    state = game.init(jax.random.PRNGKey(0))
+    K = 2
+    worlds = jax.tree_util.tree_map(
+        lambda x: jnp.broadcast_to(x[None], (K, *x.shape)), state)
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        puct_search(state, state.current_player, jax.random.PRNGKey(1),
+                    params, pv_apply, num_determinizations=K,
+                    num_simulations=8, det_states=worlds, cheat=True)
+    with pytest.raises(ValueError, match="worlds"):
+        puct_search(state, state.current_player, jax.random.PRNGKey(1),
+                    params, pv_apply, num_determinizations=3,
+                    num_simulations=8, det_states=worlds)
+
+
 def test_puct_hc_policy_fn_contract():
     pv_apply, params = _pv()
     state = game.init(jax.random.PRNGKey(0))

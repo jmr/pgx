@@ -207,6 +207,7 @@ def puct_search(
     readout: str = "visits",
     *,
     cheat: bool = False,
+    det_states: GameState = None,
     return_visits: bool = False,
 ) -> tuple[Array, ...]:
     """Run K determinized tree searches and aggregate the K roots.
@@ -256,6 +257,10 @@ def puct_search(
             resampling) — the internal analogue of JTR's `--cheating`.
             Diagnostic only (oracle probes, search-noise floors); not a
             fair player and not a collector.
+        det_states: Optional (K,)-batched precomputed root worlds,
+            replacing the uniform sampler — the belief-weighted
+            sampling hook (jass_belief draws them with replacement
+            ∝ likelihood weights). Mutually exclusive with cheat.
         return_visits: Also return the per-tree root visit counts and
             the determinized root states BEFORE aggregation — the
             per-world teacher signal (hands-conditional targets,
@@ -276,7 +281,14 @@ def puct_search(
         raise ValueError(f"unknown readout: {readout!r}")
     K = num_determinizations
     det_key, search_key, root_key = jax.random.split(key, 3)
-    if cheat:
+    if det_states is not None:
+        if cheat:
+            raise ValueError("det_states and cheat are mutually exclusive")
+        if det_states.hands.shape[0] != K:
+            raise ValueError(
+                f"det_states carries {det_states.hands.shape[0]} worlds; "
+                f"num_determinizations={K}")
+    elif cheat:
         det_states = jax.tree_util.tree_map(
             lambda x: jnp.broadcast_to(x[None], (K, *x.shape)), state
         )                                                # (K,) true state

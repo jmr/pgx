@@ -2994,3 +2994,40 @@ belief-weighted collector raises teacher quality for the first time
 since the plateau (every gen-11 negative was measured at q≈0 search),
 so a gen-12 collection attempt becomes arguable again. Decide after
 the POWERFUL read. Exact endgame targets stay queued.
+
+## 2026-07-17 — External calibration (JTR): gen-10-ctrl +6.05/game over POWERFUL***, but TIES gen-9 head-to-head — the internal +2.5 raw step does not survive JTR's search
+
+**Run externally by hand in JassTheRipper-2 (its commit `wouurprsqmlz`,
+`doc/experiment_log.md`); cross-recorded here.** Standing external
+calibration protocol, same as the gen-8d_mz / gen-9 runs (2026-07-07):
+JTR real-PUCT harness, SWEEP_64 (64 runs/det), `--pgx-policy` on every
+net side, 250 pairs / 500 games, seed 42. Import needed no code change
+(standing extract → export pipeline).
+
+| matchup | per-game | t-test | sign test | verdict |
+|:--|:--|:--|:--|:--|
+| gen-10-ctrl vs POWERFUL (classical) | **+6.05** | p<1e-4 | 150W-87L-13T, p=0.0001 | above POWERFUL |
+| gen-10-ctrl vs gen-9 (both SWEEP_64) | −2.0 ns | p=0.11 | 97W-115L-38T, p=0.24 | wash (nominally gen-9) |
+
+Reads:
+1. **The external anchor for the belief check is set: gen-10 PUCT =
+   +6.05/game over POWERFUL on the calibration ladder** (independent
+   anchors: gen-6/7 ≈0 → gen-8d_mz +4.2 → gen-9 +5.05 → gen-10 +6.05).
+   The belief arm must beat THIS, not the stale gen-9 number.
+2. **Differenced POWERFUL anchors mislead; the paired head-to-head is
+   authoritative.** +12.1 vs +10.1 per pair suggests a +1/game gen-10
+   edge, but that gap is ~0.4σ, and the direct paired match (deal
+   variance cancelled) leans the other way (−2.0 ns). Treat gen-9 and
+   gen-10 as externally TIED.
+3. **The internal gen-9→gen-10 raw step (+2.5/+2.4, both seeds sig)
+   does not transfer through JTR's search** — the operator-saturation
+   picture again (2026-07-07: search(π)≈π at this level): JTR's mature
+   classical PUCT extracts the same strength from both nets, absorbing
+   the small raw-policy edge. Same paired-wash pattern as gen-7→gen-8
+   externally (p=0.95) while internal gates moved.
+4. Implication for the belief external check: the honest comparison is
+   **belief-on vs belief-off at the SAME gen-10 config, paired** —
+   POWERFUL-anchor differencing at ±1/game resolution would swallow a
+   +4-ish effect (internal belief gate: +4.1 pooled). The JTR entry
+   also noted gen-11hc "needs changes before it will load" — resolved
+   the same evening (export landed, SOP "External harness BUILT").

@@ -219,8 +219,13 @@ and public fields only, all observable from outside.
   --pgx-belief1=src/main/resources/models/pv_gen11hc/export
   --name2=POWERFUL --strength2=POWERFUL --mode=RUNS --games=<n>`
   (knobs `--belief-particles1`, `--belief-mix1` default to the gate
-  config 32 / 0). Baseline arm = same command without `--pgx-belief1`,
-  per the standing vs-POWERFUL protocol (net trump on).
+  config 32 / 0). **Primary read (updated after the 2026-07-17
+  external calibration, log): the PAIRED head-to-head — team 1 =
+  belief-on gen-10, team 2 = the identical gen-10 config without
+  `--pgx-belief2`.** The vs-POWERFUL arm above is the anchor only:
+  anchor differencing resolves ~±1/game (gen-9 vs gen-10 both sit at
+  +5..+6 there while head-to-head ties) and would swallow a +4-ish
+  belief effect.
 - **Smoke receipt** (2 games, FAST): both nets load, filter runs each
   card decision, ESS 32 at the first decision (uniform, empty
   history) → ~1.2–2.2 mid-game — the pgx gate saw ~2.5.

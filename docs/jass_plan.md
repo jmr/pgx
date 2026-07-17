@@ -64,7 +64,14 @@ endgame targets** (unchanged); capacity / different-operator
 
 Measurement unchanged: gate vs gen-10; POWERFUL (net trump on) stays
 the external yardstick. Champion net: gen-10 (the belief config is a
-play-config promotion, not a net promotion).
+play-config promotion, not a net promotion). **External anchor set
+(2026-07-17, run in JTR — log entry "External calibration"):
+gen-10-ctrl PUCT +6.05/game over POWERFUL*** on the calibration
+ladder, but TIES gen-9 head-to-head (−2.0 ns) — the internal +2.5 raw
+step is absorbed by JTR's search (operator saturation, again). So the
+belief external check must be belief-on vs belief-off PAIRED at the
+same gen-10 config; POWERFUL-anchor differencing resolves only
+~±1/game and would swallow the expected +4-ish effect.**
 
 ## Superseded snapshot (2026-07-13)
 

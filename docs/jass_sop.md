@@ -174,6 +174,61 @@ Diagnostics:
   raw. Large + while PUCT-vs-PUCT is flat = the search is masking real policy
   gains (this is now the standing gate, above).
 
+## Belief-weighted determinization — integration (2026-07-17, CURRENT — the probe's buy branch)
+
+**Decision → plan NEXT (2026-07-17); priced by the probe (q̄ 0.56
+ceiling, log 2026-07-17) and the dose-response law (12.6·q, log
+2026-07-13). All in pgx — JTR stays the untouched external yardstick.**
+
+**What.** At each decision, run the probe's particle filter at the
+root: sample N void-consistent candidate worlds
+(`sample_determinization`), weight each by the gen-11hc likelihood of
+the OTHER three players' observed moves so far, then draw the K
+search determinizations **with replacement ∝ weights** (mid-game ESS
+~2.5 — duplicated trees ARE the q mass; do NOT deduplicate, do NOT
+inject the true world — that was a measurement-only device). Wire
+into `puct_search` (currently uniform at the root) and a
+belief-weighted variant of `make_fair_raw_action_fn`.
+
+**Design facts already established (session 2026-07-15/17, code in
+`jass_probes.py` — factor the scoring core out of
+`belief_quality_probe` rather than rewriting):**
+- Past states under a candidate world need NO replay: hands at t =
+  world's hands ∪ cards publicly played in [t,T); reconstruct = hands
+  swap on the recorded public trajectory, evaluate hc from the
+  mover-at-t's seat, sum masked log-probs. Both phases count (trump
+  choices are near-uninformative, q̄ 0.039, but free).
+- ⚠ **The arena/selfplay `action_fn(state, key)` interface cannot
+  express this**: `GameState` does not record who played which card
+  (`cards_collected` is by trick-WINNER), so the observed-move
+  history is NOT recoverable from the current state. The play loop
+  must thread a public-trajectory carry (38-slot stacked
+  states/actions/movers buffer, exactly the probe's `play_game`
+  record) alongside the state — new driver or extended action-fn
+  convention; this is the main plumbing job.
+- Fair by construction: the filter reads only own hand + public
+  fields/diffs. Keep it that way — the oracle-contamination rule
+  (raw TRUE-state arenas) does not bite here.
+- The legality channel alone (constant-logits `uniform_pv_apply`) is
+  q̄ 0.17 — a net-free fallback arm if hc plumbing is awkward, and
+  the ablation to run if the hc arm disappoints.
+- Cost per decision ≈ N × (steps so far) hc evals (~32×38 worst
+  case) — same order as one K=16×64 search; HBM knob = chunking
+  (`game_chunk` pattern).
+
+**Measurement (gate as usual):** fair PUCT (muzero K=16×64 both
+sides) belief-weighted vs gen-10 uniform-sampling, 300 pairs, seeds
+0/2; plus belief-weighted fair-raw vs gen-10 raw τ=0.05. Ceiling
+prediction +7.1/game; realized will be LOWER (deployed opponents ≠
+the matched actor — the likelihood is mismatched vs gen-10-style
+play). Any significant + at these harnesses promotes per the standing
+gate; external check vs POWERFUL after, unchanged.
+
+**Knobs (pre-register before running):** N particles (probe used 32;
+baseline 1/33), K=16 dets unchanged, optional uniform mix λ on the
+weights (guard against degenerate/misspecified likelihood — analog of
+`prior_mix_uniform`; default 0, decide before the arena).
+
 ## Belief-quality probe — hc-likelihood particle filter (2026-07-15, DONE 2026-07-17 — q̄ = 0.56 ≈ 3× the buy bar → BUY; log 2026-07-17)
 
 **Gate outcome (2026-07-17):** q̄ 0.5639 overall / 0.5848 card-play

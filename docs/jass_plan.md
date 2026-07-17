@@ -50,7 +50,9 @@ q̄ = 0.17 ≈ +2.1/game. gen-11hc IS the belief model
 problem. **Now the buy branch: likelihood-weighted world sampling in
 `puct_search`/fair-raw (sample worlds with replacement ∝ particle
 weights; mid-game ESS ~2.5, duplicated trees are the point), then
-fair arenas vs gen-10, gate as usual.** Caveat priced in: deployed
+fair arenas vs gen-10, gate as usual — procedure and established
+design facts → jass_sop.md "Belief-weighted determinization —
+integration".** Caveat priced in: deployed
 opponents ≠ the matched actor, realized q̄ will be lower — the arena
 is the gate, the probe only priced the route. Queued behind it:
 **exact endgame targets** (unchanged); capacity / different-operator

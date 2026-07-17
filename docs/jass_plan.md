@@ -38,21 +38,23 @@ the historical ~+2.5/gen (gen-9 +2.8/+4.2, gen-10 +2.5/+2.4). With
 capacity, coverage, and both search operators already dead
 (2026-07-07/11), iterating self-play in ANY form now pays zero.
 
-**NEXT (DECIDED 2026-07-15): BELIEF-WEIGHTED DETERMINIZATION, staged —
-first the offline BELIEF-QUALITY PROBE (procedure → jass_sop.md
-"Belief-quality probe"), measurement-only, no collection, no
-training.** Particle-filter self-play diagnostic: weight candidate
-worlds by the gen-11hc policy's likelihood of the opponents' OBSERVED
-moves, and measure the achievable world mass (effective q, placement
-overlap, by trick) against the dose-response price: payoff ≈ 12.6·q̄.
-Pre-registered bar: q̄ ≥ ~0.2 (≈ +2.5/game) → build the reweighted
-sampling into the searchers and re-run the fair arenas; q̄ ≲ 0.05 →
-route dead, go to endgame targets without paying for search plumbing.
-The sequencing-synergy bet paid exactly as designed: **gen-11hc IS the
-belief model** (`pv_gen11hc.msgpack`, probe KL ≈ teacher signal), so
-no separate belief net and no marginals→joint sampling problem.
-Queued behind it: **exact endgame targets** (unchanged); capacity /
-different-operator (unchanged, lowest odds).
+**NEXT (UPDATED 2026-07-17): BUILD BELIEF-WEIGHTED DETERMINIZATION —
+the probe PASSED at ~3× the buy bar (log 2026-07-17).** The staged
+belief-quality probe (spec 2026-07-15) came back **q̄ = 0.56**
+(matched-actor ceiling, 128 games × 32+1 particles): predicted
++7.1/game at ceiling, mass front-loaded (0.27 by trick 0, 0.61 by
+trick 2 — before the trick-7 relevance dip), and the LEGALITY channel
+alone (constant-logits likelihood — pure legal-move Bayes, no net) is
+q̄ = 0.17 ≈ +2.1/game. gen-11hc IS the belief model
+(`pv_gen11hc.msgpack`); no separate belief net, no marginals→joint
+problem. **Now the buy branch: likelihood-weighted world sampling in
+`puct_search`/fair-raw (sample worlds with replacement ∝ particle
+weights; mid-game ESS ~2.5, duplicated trees are the point), then
+fair arenas vs gen-10, gate as usual.** Caveat priced in: deployed
+opponents ≠ the matched actor, realized q̄ will be lower — the arena
+is the gate, the probe only priced the route. Queued behind it:
+**exact endgame targets** (unchanged); capacity / different-operator
+(unchanged, lowest odds).
 
 Measurement unchanged: gate vs gen-10; POWERFUL (net trump on) stays
 the external yardstick.

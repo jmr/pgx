@@ -174,7 +174,13 @@ Diagnostics:
   raw. Large + while PUCT-vs-PUCT is flat = the search is masking real policy
   gains (this is now the standing gate, above).
 
-## Belief-quality probe — hc-likelihood particle filter (2026-07-15, CURRENT — the gate on belief-weighted determinization)
+## Belief-quality probe — hc-likelihood particle filter (2026-07-15, DONE 2026-07-17 — q̄ = 0.56 ≈ 3× the buy bar → BUY; log 2026-07-17)
+
+**Gate outcome (2026-07-17):** q̄ 0.5639 overall / 0.5848 card-play
+(uniform 1/33), predicted +7.1/game at the matched-actor ceiling;
+mass front-loaded (peak 0.66 @ trick 4); blind/legality-only arm
+q̄ 0.166. The buy branch fires: likelihood-weighted world sampling in
+`puct_search`/fair-raw, fair arenas vs gen-10, gate as usual.
 
 **Decision → plan NEXT (2026-07-15). This runs BEFORE any search
 integration: it prices the belief lever offline. Cost: an afternoon of

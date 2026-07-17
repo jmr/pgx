@@ -229,6 +229,25 @@ baseline 1/33), K=16 dets unchanged, optional uniform mix λ on the
 weights (guard against degenerate/misspecified likelihood — analog of
 `prior_mix_uniform`; default 0, decide before the arena).
 
+**Tooling (BUILT 2026-07-17, this stack):**
+`pgx/_src/games/jass_belief.py` — `world_log_likelihoods` is the
+scoring core FACTORED OUT of `belief_quality_probe` (probe re-verified
+bit-identical after the refactor); `make_belief_world_fn` runs one
+filter pass (N particles + normalized weights, λ mix knob);
+`make_belief_puct_action_fn` resamples K dets ∝ weights and feeds them
+to `puct_search(det_states=…)` (the new hook — uniform sampler
+bypassed, no dedup, no true-world injection);
+`make_belief_fair_raw_action_fn` plays the exact weighted policy
+mixture over the N particles (no resampling, argmax = standing
+fair-raw config). Plumbing: `PublicTrajectory` (38-slot stacked
+states/actions/valid, the probe's `play_game` record) threaded by
+`belief_policy_match` / `run_belief_arena` to `(state, traj, key)`
+action fns; lift plain agents with `as_traj_action_fn`. Thin wrapper
+`scripts/jass_belief_arena.py --arm puct|raw` runs both measurement
+arms with the standing stats. Smoke-verified on CPU: legality-only
+weights move off uniform mid-game (ESS 5.9/8 @ trick 6), belief-PUCT
+vs uniform-PUCT arena runs end to end.
+
 ## Belief-quality probe — hc-likelihood particle filter (2026-07-15, DONE 2026-07-17 — q̄ = 0.56 ≈ 3× the buy bar → BUY; log 2026-07-17)
 
 **Gate outcome (2026-07-17):** q̄ 0.5639 overall / 0.5848 card-play

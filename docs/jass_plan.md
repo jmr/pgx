@@ -47,12 +47,14 @@ trick 2 — before the trick-7 relevance dip), and the LEGALITY channel
 alone (constant-logits likelihood — pure legal-move Bayes, no net) is
 q̄ = 0.17 ≈ +2.1/game. gen-11hc IS the belief model
 (`pv_gen11hc.msgpack`); no separate belief net, no marginals→joint
-problem. **Now the buy branch: likelihood-weighted world sampling in
-`puct_search`/fair-raw (sample worlds with replacement ∝ particle
-weights; mid-game ESS ~2.5, duplicated trees are the point), then
-fair arenas vs gen-10, gate as usual — procedure and established
-design facts → jass_sop.md "Belief-weighted determinization —
-integration".** Caveat priced in: deployed
+problem. **The buy branch is BUILT (2026-07-17): likelihood-weighted world
+sampling lives in `pgx/_src/games/jass_belief.py` (filter + belief
+PUCT via `puct_search(det_states=…)` + belief fair-raw + trajectory
+plumbing/drivers), runnable via `scripts/jass_belief_arena.py
+--arm puct|raw`. NEXT = run the two fair arenas vs gen-10 (300 pairs,
+seeds 0/2; pre-register N=32, λ=0), gate as usual — procedure and
+established design facts → jass_sop.md "Belief-weighted
+determinization — integration".** Caveat priced in: deployed
 opponents ≠ the matched actor, realized q̄ will be lower — the arena
 is the gate, the probe only priced the route. Queued behind it:
 **exact endgame targets** (unchanged); capacity / different-operator

@@ -38,30 +38,31 @@ the historical ~+2.5/gen (gen-9 +2.8/+4.2, gen-10 +2.5/+2.4). With
 capacity, coverage, and both search operators already dead
 (2026-07-07/11), iterating self-play in ANY form now pays zero.
 
-**NEXT (UPDATED 2026-07-17): BUILD BELIEF-WEIGHTED DETERMINIZATION —
-the probe PASSED at ~3× the buy bar (log 2026-07-17).** The staged
-belief-quality probe (spec 2026-07-15) came back **q̄ = 0.56**
-(matched-actor ceiling, 128 games × 32+1 particles): predicted
-+7.1/game at ceiling, mass front-loaded (0.27 by trick 0, 0.61 by
-trick 2 — before the trick-7 relevance dip), and the LEGALITY channel
-alone (constant-logits likelihood — pure legal-move Bayes, no net) is
-q̄ = 0.17 ≈ +2.1/game. gen-11hc IS the belief model
-(`pv_gen11hc.msgpack`); no separate belief net, no marginals→joint
-problem. **The buy branch is BUILT (2026-07-17): likelihood-weighted world
-sampling lives in `pgx/_src/games/jass_belief.py` (filter + belief
-PUCT via `puct_search(det_states=…)` + belief fair-raw + trajectory
-plumbing/drivers), runnable via `scripts/jass_belief_arena.py
---arm puct|raw`. NEXT = run the two fair arenas vs gen-10 (300 pairs,
-seeds 0/2; pre-register N=32, λ=0), gate as usual — procedure and
-established design facts → jass_sop.md "Belief-weighted
-determinization — integration".** Caveat priced in: deployed
-opponents ≠ the matched actor, realized q̄ will be lower — the arena
-is the gate, the probe only priced the route. Queued behind it:
-**exact endgame targets** (unchanged); capacity / different-operator
+**NEXT (UPDATED 2026-07-17, evening): BELIEF-WEIGHTED PUCT PASSED THE
+GATE — external check vs POWERFUL, then the belief-collection
+decision.** The integration (built same day,
+`pgx/_src/games/jass_belief.py`: hc-likelihood particle filter +
+belief PUCT via `puct_search(det_states=…)` + belief fair-raw +
+trajectory plumbing/drivers) was gated vs gen-10 at the pre-registered
+knobs (N=32, λ=0, K=16×64, 300 pairs, seeds 0/2): **PUCT arm +2.8 /
++5.3, pooled +4.1/game (p<1e-4) — promoted as the internal best play
+config; raw arm null** (gen-10's hands-blind policy head cannot
+convert q; the mechanism is search — world-dependent dynamics + the
+hands-aware value head). Implied realized q̄ ≈ 0.33: the dose-response
+law held through deployment at the priced mismatched-actor discount.
+First internal strength gain since gen-10, play-time only — no
+collection, no training. **NEXT: (1) external check vs POWERFUL
+(harness note in the SOP section — the public trajectory is
+observable from outside, mirror-state diffs suffice); (2) then decide
+belief-weighted COLLECTION: the collector is PUCT, so the pass
+re-opens gen-12 — every plateau negative (capacity, coverage, refresh,
+gen-11) was measured with a q≈0 teacher.** Queued behind: **exact
+endgame targets** (unchanged); capacity / different-operator
 (unchanged, lowest odds).
 
 Measurement unchanged: gate vs gen-10; POWERFUL (net trump on) stays
-the external yardstick.
+the external yardstick. Champion net: gen-10 (the belief config is a
+play-config promotion, not a net promotion).
 
 ## Superseded snapshot (2026-07-13)
 

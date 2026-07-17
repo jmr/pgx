@@ -174,7 +174,23 @@ Diagnostics:
   raw. Large + while PUCT-vs-PUCT is flat = the search is masking real policy
   gains (this is now the standing gate, above).
 
-## Belief-weighted determinization — integration (2026-07-17, CURRENT — the probe's buy branch)
+## Belief-weighted determinization — integration (2026-07-17, DONE same day — GATE PASSED on the PUCT arm, config PROMOTED; log 2026-07-17)
+
+**Gate outcome (2026-07-17):** PUCT arm +2.8 (p=0.057) / +5.3
+(p=0.0003), pooled +4.1/game over 600 pairs (p<1e-4) — the
+pre-registered "any significant +" clause fires; implied realized
+q̄ ≈ 0.33 (between the 0.17 legality floor and the 0.56 matched
+ceiling, as priced). Raw arm null (−1.3/−0.3 ns): gen-10's
+hands-blind policy head has no mechanism to convert q — expected.
+**Belief-weighted PUCT (K=16×64, N=32, λ=0, gen-11hc likelihood) is
+the internal best play config; champion net stays gen-10; deployed
+raw config unchanged. NEXT = external check vs POWERFUL, then decide
+belief-weighted COLLECTION (the pass re-opens the gen-12 question —
+all plateau negatives were measured at q≈0 search).** External-harness
+note: the JTR driver must thread the public record; a mirror
+trajectory whose opponent "hands" are their not-yet-played cards is
+sufficient — the filter reads hand DIFFS (cards played per player)
+and public fields only, all observable from outside.
 
 **Decision → plan NEXT (2026-07-17); priced by the probe (q̄ 0.56
 ceiling, log 2026-07-17) and the dose-response law (12.6·q, log

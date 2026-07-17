@@ -227,7 +227,7 @@ def uniform_pv_apply(params, cm, hd):
 
 def belief_quality_probe(hc_apply, hc_params, *, games: int = 64,
                          particles: int = 16, seed: int = 0,
-                         actor_action_fn=None) -> dict:
+                         actor_action_fn=None, game_chunk: int = 16) -> dict:
     """Particle-filter belief probe: price the hc-likelihood route.
 
     At every decision of every game, sample `particles` void-consistent
@@ -253,6 +253,11 @@ def belief_quality_probe(hc_apply, hc_params, *, games: int = 64,
             top, so the uniform baseline is 1/(particles+1)).
         seed: PRNG seed.
         actor_action_fn: Optional move generator for the games.
+        game_chunk: Games per jitted call. The scoring batch holds
+            game_chunk × (particles+1) × 38 net activations live at
+            once, so this is the HBM knob (128×33 in one call OOMs a
+            16G device). Per-game results don't depend on the chunking
+            (same keys per game; only float reduction order differs).
 
     Returns:
         dict of numpy arrays over (games, T) probe steps — q (weight
@@ -351,9 +356,20 @@ def belief_quality_probe(hc_apply, hc_params, *, games: int = 64,
 
     t0 = time.time()
     keys = jax.random.split(jax.random.PRNGKey(seed), games)
-    outs = jax.jit(jax.vmap(run_one))(keys)
+    # Pad to a whole number of chunks (one jit shape), trim after.
+    n_chunks = -(-games // game_chunk)
+    pad = n_chunks * game_chunk - games
+    keys = jnp.concatenate([keys, keys[:pad]]) if pad else keys
+    run = jax.jit(jax.vmap(run_one))
+    chunks = []
+    for i in range(n_chunks):
+        chunks.append(jax.device_get(
+            run(keys[i * game_chunk:(i + 1) * game_chunk])))
+        if n_chunks > 1:
+            print(f"  chunk {i + 1}/{n_chunks} [{time.time() - t0:.0f}s]")
+    outs = [np.concatenate(x)[:games] for x in zip(*chunks)]
     q, weights, placement, misplaced, n_scored, n_unknown, trick, phase, \
-        valid = [np.asarray(x) for x in outs]
+        valid = outs
     return dict(q=q, weights=weights, placement=placement,
                 misplaced=misplaced, n_scored=n_scored, n_unknown=n_unknown,
                 trick=trick, phase=phase, valid=valid, games=games,

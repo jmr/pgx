@@ -41,6 +41,9 @@ def main():
                         help="Sampled worlds per decision, on top of the "
                              "injected true world (default: 16)")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--game-chunk", type=int, default=16,
+                        help="Games per jitted call — the HBM knob "
+                             "(default: 16)")
     parser.add_argument("--blind", action="store_true",
                         help="Legality-only baseline: same games (actor = "
                              "the loaded net, raw τ=1), but score worlds "
@@ -65,7 +68,8 @@ def main():
     res = belief_quality_probe(hc_apply, hc_params,
                                games=args.games, particles=args.particles,
                                seed=args.seed,
-                               actor_action_fn=actor_action_fn)
+                               actor_action_fn=actor_action_fn,
+                               game_chunk=args.game_chunk)
     print_belief_quality_report(res)
 
 

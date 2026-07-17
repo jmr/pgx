@@ -3,8 +3,11 @@ import jax.numpy as jnp
 import numpy as np
 
 from pgx._src.games.jass_probes import (
+    belief_quality_probe,
     hidden_hand_probe,
+    print_belief_quality_report,
     print_hidden_hand_report,
+    uniform_pv_apply,
 )
 from pgx._src.games.jass_value_net import PolicyValueNet
 
@@ -30,4 +33,26 @@ def test_hidden_hand_probe_contract(capsys):
     print_hidden_hand_report(res)
     out = capsys.readouterr().out
     assert "policy KL(true||world)" in out
+    assert "by trick:" in out
+
+
+def test_belief_quality_probe_contract(capsys):
+    G, T, N = 2, 38, 2
+    res = belief_quality_probe(uniform_pv_apply, None,
+                               games=G, particles=N, seed=0, game_chunk=G)
+    for name in ("q", "n_scored", "n_unknown", "trick", "phase", "valid"):
+        assert res[name].shape == (G, T), name
+    for name in ("weights", "placement", "misplaced"):
+        assert res[name].shape == (G, T, N + 1), name
+    m = res["valid"].astype(bool)
+    assert m.any() and not m.all()
+    assert np.all((res["q"][m] >= 0) & (res["q"][m] <= 1 + 1e-5))
+    assert np.allclose(res["weights"][m].sum(-1), 1.0, atol=1e-4)
+    # Particle 0 is the injected true world: never misplaced.
+    assert np.all(res["misplaced"][m][:, 0] == 0)
+    assert np.allclose(res["placement"][m][:, 0], 1.0, atol=1e-5)
+
+    print_belief_quality_report(res)
+    out = capsys.readouterr().out
+    assert "effective q̄" in out
     assert "by trick:" in out

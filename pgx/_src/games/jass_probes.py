@@ -45,6 +45,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from pgx._src.games.jass import Game, value_features
+from pgx._src.games.jass_belief import world_log_likelihoods
 from pgx._src.games.jass_mcts import sample_determinization
 from pgx._src.games.jass_selfplay import make_policy_action_fn
 from pgx._src.games.jass_value_net import TARGET_SCALE
@@ -237,7 +238,9 @@ def belief_quality_probe(hc_apply, hc_params, *, games: int = 64,
     moves so far: log L(w) = Σ_t log P_hc(move_t | state_t under w),
     with the hc policy evaluated from the mover-at-t's seat. Past
     states under w need no replay: hands at t are w's hands plus the
-    cards each player publicly played in [t, T).
+    cards each player publicly played in [t, T). The scoring core is
+    jass_belief.world_log_likelihoods, shared with the deployed
+    belief-weighted searchers.
 
     The actor defaults to the hc net itself, raw sampled at τ=1 on the
     true state — the matched-likelihood setting, i.e. the CEILING of
@@ -293,7 +296,6 @@ def belief_quality_probe(hc_apply, hc_params, *, games: int = 64,
 
     def probe_game(traj, key):
         states, actions, movers, valid = traj
-        hands_all = states.hands                          # (T, 4, 36)
 
         def probe_step(_, xs):
             T, k = xs
@@ -305,27 +307,11 @@ def belief_quality_probe(hc_apply, hc_params, *, games: int = 64,
             )(jax.random.split(k, particles))             # (N, 4, 36)
             worlds = jnp.concatenate([sT.hands[None], sampled])
 
-            # Cards p played in [t, T) — public info (observed plays),
-            # read off the recorded hands for convenience. World w's
-            # hands at step t = w's hands now, plus these back.
-            replay = hands_all & ~sT.hands[None]          # (T, 4, 36)
-            recon = worlds[:, None] | replay[None]        # (N+1, T, 4, 36)
-
             steps = jnp.arange(_MAX_STEPS)
             inc = (steps < T) & (movers != probed) & valid
-
-            def score_step(hands_t, t):
-                st = jax.tree_util.tree_map(
-                    lambda x: x[t], states)._replace(hands=hands_t)
-                cm, hd = value_features(st, st.current_player)
-                logits, _ = hc_apply(hc_params, cm[None], hd[None])
-                mask = _game.legal_action_mask(st)
-                lp = jax.nn.log_softmax(
-                    jnp.where(mask, logits[0], jnp.float32(-1e9)))
-                return jnp.where(inc[t], lp[actions[t]], 0.0)
-
-            logl = jax.vmap(
-                lambda rh: jax.vmap(score_step)(rh, steps).sum())(recon)
+            logl = world_log_likelihoods(
+                hc_apply, hc_params, states, actions, inc,
+                sT.hands, worlds)
             weights = jax.nn.softmax(logl)                # (N+1,)
 
             valid_trick = sT.trick_cards >= 0

@@ -229,6 +229,15 @@ and public fields only, all observable from outside.
 - **Smoke receipt** (2 games, FAST): both nets load, filter runs each
   card decision, ESS 32 at the first decision (uniform, empty
   history) → ~1.2–2.2 mid-game — the pgx gate saw ~2.5.
+- **OUTCOME (2026-07-18, log "Belief EXTERNAL check"): paired arm
+  NULL (+0.6 ns), vs-POWERFUL +3.5** — the belief gain is
+  internal-operator-specific.** Harness note for reruns: the replay
+  forehand must come from the FIRST RECORDED MOVE (the session's
+  seating list rotates between games — the desync the first launch
+  hit, fixed in `rtmtvklk`); and JTR occasionally (~1/40 games)
+  plays a random fallback card when `getCardsPossibleToPlay` and
+  `Mode.canPlayCard` disagree — pre-existing, both arms, ignorable
+  at this rate but visible as ERROR lines in the logs.
 
 **Decision → plan NEXT (2026-07-17); priced by the probe (q̄ 0.56
 ceiling, log 2026-07-17) and the dose-response law (12.6·q, log

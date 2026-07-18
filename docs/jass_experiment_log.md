@@ -3031,3 +3031,56 @@ Reads:
    +4-ish effect (internal belief gate: +4.1 pooled). The JTR entry
    also noted gen-11hc "needs changes before it will load" — resolved
    the same evening (export landed, SOP "External harness BUILT").
+
+## 2026-07-18 — Belief EXTERNAL check (JTR): paired belief-on vs belief-off NULL (+0.6/game, p=0.60) — the internal +4.1 does NOT survive JTR's operator; config stays above POWERFUL (+3.5**)
+
+**The external check the 2026-07-17 gate queued, run overnight in
+JassTheRipper-2 (harness commit `rtmtvklk`).** Protocol per the
+standing calibration: SWEEP_64, `--pgx-policy` on net sides, 250
+pairs/500 games, seed 42. Team 1 = gen-10 PUCT + belief-weighted
+determinization (`--pgx-belief1` = gen-11hc, N=32, λ=0); baselines
+per the pre-registered design (log 2026-07-17 external calibration):
+the PAIRED belief-off arm is primary, POWERFUL the anchor.
+
+| run | matchup | per-game | t-test | sign test | verdict |
+|:--|:--|:--|:--|:--|:--|
+| A (primary) | belief-on vs belief-off gen-10, paired | **+0.6 ns** | p=0.60 | 89W-84L-77T, p=0.76 | **NULL** |
+| B (anchor) | belief gen-10 vs POWERFUL | +3.5 | p=0.016 | 146W-95L-9T, p=0.0012 | above POWERFUL |
+
+Health: zero filter exceptions over 6,701 belief decisions; ESS
+median 4.76 (p10 1.49, p90 16.8) — mass concentrated as in the
+internal gate. Caveat: 12 (run A) + 8 (run B) "invalid card" random
+fallbacks (~1/40 games, both arms) — a PRE-EXISTING JTR rules
+disagreement (`getCardsPossibleToPlay` permits a card
+`Mode.canPlayCard` rejects; the MCTS pick was in the possible set
+each time); path untouched by the belief change, far too rare to move
+±0.6/game. (First launch aborted by a real harness bug the filter's
+fail-fast invariant caught — replay forehand desynced from game #2 of
+each session because `getPlayersInInitialOrder().get(0)` is not the
+leader after the dealer rotates; fixed = forehand read from the first
+recorded move, regression-tested, squashed into `rtmtvklk`.)
+
+Reads:
+1. **The belief gain is OPERATOR-SPECIFIC, not free strength.** pgx's
+   muzero PUCT (K=16×64) converted q into +4.1/game; JTR's classical
+   PUCT (~2,880 exp/move, 25–45 root worlds) converts it into ZERO,
+   measured at the resolution that matters (paired, deal-variance
+   cancelled). Anchor consistency: belief +7.0/pair vs POWERFUL
+   against belief-off's +12.1 the day before = −5.1/pair ≈ 1.3σ — ns,
+   anchors can't see what the paired run settles.
+2. Candidate mechanism (recorded, not tested): JTR already runs 25–45
+   root determinizations vs pgx's 16 — at ESS ~2–5 the belief draw
+   collapses those to a few unique worlds, trading the diversity its
+   value-averaging exploits for accuracy it apparently doesn't need
+   at that world count. Also its rollout-blended leaf values lean
+   less on the hands-aware value head than the internal mechanism
+   did (the gate's converter was search dynamics + value head).
+3. **Implication for the belief-collection / gen-12 fork:** the
+   internal pass stands where it matters — the COLLECTOR is pgx's own
+   muzero PUCT, exactly the operator that converts q. But this null
+   is a caution against reading the +4.1 as general strength: a
+   different mature searcher extracts the same play from gen-10
+   without the belief. Decision deliberately left open.
+4. External standing: the deployed-config family remains above
+   POWERFUL (belief arm +3.5**, sign p=0.0012); gen-10's own anchor
+   is +6.05 — treat the two as anchor-equal (read 1).

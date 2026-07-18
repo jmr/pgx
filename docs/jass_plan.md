@@ -51,14 +51,26 @@ convert q; the mechanism is search — world-dependent dynamics + the
 hands-aware value head). Implied realized q̄ ≈ 0.33: the dose-response
 law held through deployment at the priced mismatched-actor discount.
 First internal strength gain since gen-10, play-time only — no
-collection, no training. **NEXT: (1) external check vs POWERFUL —
-harness BUILT 2026-07-17 late (JassTheRipper-2 commit `rtmtvklk`:
-`PgxBeliefFilter` + `--pgx-belief1` flag; gen-11hc exported with NO
-export-script changes, fp + parity verified; exact command + smoke
-receipt in the SOP "External harness BUILT" block) — just run it;
-(2) then decide belief-weighted COLLECTION: the collector is PUCT, so
-the pass re-opens gen-12 — every plateau negative (capacity, coverage,
-refresh, gen-11) was measured with a q≈0 teacher.** Queued behind: **exact
+collection, no training.
+
+**EXTERNAL CHECK RAN 2026-07-18 (harness = JassTheRipper-2
+`rtmtvklk`, built 07-17; log entry "Belief EXTERNAL check"): the
+paired belief-on vs belief-off arm is NULL (+0.6/game, p=0.60, 250
+pairs) — the +4.1 is OPERATOR-SPECIFIC. JTR's classical PUCT (~2,880
+exp/move, 25–45 root worlds) extracts the same strength from gen-10
+without the belief; the config stays above POWERFUL (+3.5**, sign
+p=0.0012), anchor-equal with plain gen-10 (+6.05). Belief-weighted
+PUCT remains the best INTERNAL play config (its operator converts q);
+it is NOT a general-strength gain.**
+
+**NEXT: decide belief-weighted COLLECTION (gen-12).** For: the
+collector is pgx's muzero PUCT — exactly the operator where belief
+passed (+4.1), and every plateau negative was measured with a q≈0
+teacher. Against: the external null shows a mature searcher gets the
+same play from gen-10 uniformly — the +4.1 may be recovering an
+internal-operator inefficiency rather than adding information a
+student could learn. Queued behind: exact endgame targets (unchanged);
+capacity / different-operator (unchanged, lowest odds). Queued behind: **exact
 endgame targets** (unchanged); capacity / different-operator
 (unchanged, lowest odds).
 

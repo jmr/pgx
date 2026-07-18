@@ -9,7 +9,7 @@ markers as work completes. **Dated experiment results and diagnostics live in
 `docs/jass_experiment_log.md`** (append new results there; this file keeps
 conclusions and pointers). The per-generation procedure is `docs/jass_sop.md`.
 
-## Status snapshot (2026-07-15)
+## Status snapshot (2026-07-18)
 
 **CHAMPION: gen-10 (= 10-ctrl) — UNCHANGED. gen-11 promotes NOTHING.**
 
@@ -38,9 +38,8 @@ the historical ~+2.5/gen (gen-9 +2.8/+4.2, gen-10 +2.5/+2.4). With
 capacity, coverage, and both search operators already dead
 (2026-07-07/11), iterating self-play in ANY form now pays zero.
 
-**NEXT (UPDATED 2026-07-17, evening): BELIEF-WEIGHTED PUCT PASSED THE
-GATE — external check vs POWERFUL, then the belief-collection
-decision.** The integration (built same day,
+**BELIEF-WEIGHTED PUCT PASSED THE INTERNAL GATE (2026-07-17).** The
+integration (built same day,
 `pgx/_src/games/jass_belief.py`: hc-likelihood particle filter +
 belief PUCT via `puct_search(det_states=…)` + belief fair-raw +
 trajectory plumbing/drivers) was gated vs gen-10 at the pre-registered
@@ -69,10 +68,8 @@ passed (+4.1), and every plateau negative was measured with a q≈0
 teacher. Against: the external null shows a mature searcher gets the
 same play from gen-10 uniformly — the +4.1 may be recovering an
 internal-operator inefficiency rather than adding information a
-student could learn. Queued behind: exact endgame targets (unchanged);
-capacity / different-operator (unchanged, lowest odds). Queued behind: **exact
-endgame targets** (unchanged); capacity / different-operator
-(unchanged, lowest odds).
+student could learn. Queued behind: **exact endgame targets**
+(unchanged); capacity / different-operator (unchanged, lowest odds).
 
 Measurement unchanged: gate vs gen-10; POWERFUL (net trump on) stays
 the external yardstick. Champion net: gen-10 (the belief config is a

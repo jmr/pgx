@@ -10,6 +10,8 @@ from pgx._src.games.jass_belief import (
     empty_trajectory,
     make_belief_fair_raw_action_fn,
     make_belief_puct_action_fn,
+    make_belief_puct_collect_fn,
+    make_belief_puct_policy_fn,
     make_belief_world_fn,
     record_step,
     run_belief_arena,
@@ -136,6 +138,52 @@ def test_belief_puct_qsum_rejects_temperature():
     with pytest.raises(ValueError, match="qsum"):
         make_belief_puct_action_fn(pv_apply, pv_params, pv_apply, pv_params,
                                    readout="qsum", temperature=1.0)
+
+
+def test_belief_puct_policy_fn_contract():
+    pv_apply, pv_params = _pv()
+    hc_apply, hc_params = _pv(seed=2)
+    s, traj = _play_traj(10)
+    fn = jax.jit(make_belief_puct_policy_fn(
+        pv_apply, pv_params, hc_apply, hc_params,
+        num_particles=2, num_determinizations=2, num_simulations=8,
+        temperature=1.0))
+    action, pi = fn(s, traj, jax.random.PRNGKey(3))
+    legal = np.asarray(game.legal_action_mask(s))
+    assert bool(legal[action])
+    pi = np.asarray(pi)
+    assert pi.shape == (43,)
+    assert np.isclose(pi.sum(), 1.0, atol=1e-5)
+    assert np.all(pi[~legal] == 0)
+
+
+def test_belief_collect_contract():
+    pv_apply, pv_params = _pv()
+    hc_apply, hc_params = _pv(seed=2)
+    collect_fn = make_belief_puct_collect_fn(
+        pv_apply, pv_params, hc_apply, hc_params,
+        num_particles=2, num_determinizations=2, num_simulations=4)
+    cm, hd, labels, pi, legal, alive = collect_fn(jax.random.PRNGKey(0), 2)
+    B, T = 2, 38
+    assert cm.shape == (B, T, 36, 12) and hd.shape == (B, T, 20)
+    assert labels.shape == (B, T) and pi.shape == (B, T, 43)
+    assert legal.shape == (B, T, 43) and alive.shape == (B, T)
+    alive = np.asarray(alive)
+    pi = np.asarray(pi)
+    legal = np.asarray(legal)
+    # Every game runs 37 or 38 steps (1–2 trump + 36 card plays).
+    assert np.all(alive.sum(axis=1) >= 37)
+    # Alive steps: pi is a distribution over the legal actions.
+    assert np.allclose(pi[alive].sum(-1), 1.0, atol=1e-5)
+    assert np.all(pi[alive][~legal[alive]] == 0)
+    # Labels are the acting player's terminal differential: within a
+    # game, every step's label is ± one magnitude (seat parity).
+    labels = np.asarray(labels)
+    for b in range(B):
+        assert len(np.unique(np.abs(labels[b][alive[b]]))) == 1
+    # Same key replays the same games.
+    again = collect_fn(jax.random.PRNGKey(0), 2)
+    assert np.array_equal(np.asarray(again[2]), labels)
 
 
 def test_belief_policy_match_contract():

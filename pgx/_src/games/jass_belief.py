@@ -29,8 +29,10 @@ express the filter — `GameState` does not record who played which card
 NOT recoverable from the current state. Belief agents therefore take
 `(state, traj, key)` with `traj` a `PublicTrajectory`: the 38-slot
 stacked states/actions buffer of the probe's `play_game` record,
-threaded by the driver (`belief_policy_match` / `run_belief_arena`;
-lift plain agents with `as_traj_action_fn`). The recorded states are
+threaded by the driver (`belief_policy_match` / `run_belief_arena` for
+arenas, `make_belief_puct_collect_fn` for collection — the gen-12
+generator; lift plain agents with `as_traj_action_fn`). The recorded
+states are
 the driver's TRUE states, but the filter reads only the mover's own
 hand and public fields/diffs (cards played in [t, now) = hand diffs),
 so belief agents are fair by construction — the oracle-contamination
@@ -49,7 +51,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import Array
 
-from pgx._src.games.jass import Game, GameState, value_features
+from pgx._src.games.jass import Game, GameState, NUM_ACTIONS, value_features
 from pgx._src.games.jass_mcts import sample_determinization
 
 _game = Game()
@@ -171,7 +173,7 @@ def make_belief_world_fn(hc_apply, hc_params, *, num_particles: int = 32,
     return world_fn
 
 
-def make_belief_puct_action_fn(
+def make_belief_puct_policy_fn(
     pv_apply,
     pv_params,
     hc_apply,
@@ -190,19 +192,22 @@ def make_belief_puct_action_fn(
     readout: str = "visits",
     temperature: float = None,
 ):
-    """Belief-weighted PUCT: action_fn(state, traj, key) → action.
+    """Belief-weighted PUCT: policy_fn(state, traj, key) → (action, pi).
 
-    The same searcher as jass_puct.make_puct_action_fn, but the K root
+    The same searcher as jass_puct.make_puct_policy_fn, but the K root
     determinizations are drawn with replacement ∝ belief weights from N
     candidate worlds instead of uniformly (duplicated roots carry the q
     mass — no dedup). Search net (pv_*) and likelihood net (hc_*) are
-    separate arguments: the standing arena searches with the incumbent
+    separate arguments: the standing config searches with the incumbent
     net and weighs worlds with gen-11hc.
 
-    temperature=None (default) plays the greedy argmax of the
-    aggregated scores; otherwise the action is sampled ∝
-    scores^(1/temperature) (visits readout only, as in
-    make_puct_policy_fn).
+    readout="visits" (default): pi is the normalized summed visit
+    distribution across the belief-drawn trees — the belief-collection
+    policy target (a posterior-weighted info-set marginal, vs the
+    uniform marginal of the standing collector). The executed action is
+    the visit argmax when temperature is None, otherwise sampled ∝
+    scores^(1/temperature). readout="qsum": greedy argmax, pi is its
+    one-hot; requires temperature=None (as in make_puct_policy_fn).
     """
     # In-function import: keeps this module (and jass_probes, which
     # imports it) free of jass_puct's mctx dependency.
@@ -217,8 +222,7 @@ def make_belief_puct_action_fn(
                                     num_particles=num_particles,
                                     mix_uniform=mix_uniform)
 
-    def action_fn(state: GameState, traj: PublicTrajectory,
-                  key: Array) -> Array:
+    def policy_fn(state: GameState, traj: PublicTrajectory, key: Array):
         k_world, k_draw, k_search, k_sample = jax.random.split(key, 4)
         worlds, weights = world_fn(state, traj, k_world)
         idx = jax.random.categorical(
@@ -234,13 +238,38 @@ def make_belief_puct_action_fn(
             prior_mix_uniform=prior_mix_uniform,
             rollout_value_weight=rollout_value_weight,
             readout=readout, det_states=det_states)
-        if temperature is None:
-            return jnp.argmax(
-                jnp.where(legal, scores, -jnp.inf)).astype(jnp.int32)
-        logits = jnp.where(
-            legal, jnp.log(scores.clip(1e-9)) / temperature,
-            jnp.float32(-1e9))
-        return jax.random.categorical(k_sample, logits).astype(jnp.int32)
+        if readout == "qsum":
+            action = jnp.argmax(scores)          # already −inf masked
+            pi = jax.nn.one_hot(action, NUM_ACTIONS)
+        elif temperature is None:
+            pi = scores / scores.sum().clip(1.0)
+            action = jnp.argmax(jnp.where(legal, scores, -jnp.inf))
+        else:
+            pi = scores / scores.sum().clip(1.0)
+            logits = jnp.where(
+                legal, jnp.log(scores.clip(1e-9)) / temperature,
+                jnp.float32(-1e9))
+            action = jax.random.categorical(k_sample, logits)
+        return action.astype(jnp.int32), pi
+
+    return policy_fn
+
+
+def make_belief_puct_action_fn(pv_apply, pv_params, hc_apply, hc_params,
+                               **kwargs):
+    """Belief-weighted PUCT: action_fn(state, traj, key) → action.
+
+    make_belief_puct_policy_fn with the pi discarded — the arena/play
+    wrapper (the 2026-07-17 gate config; knobs and defaults are the
+    policy fn's).
+    """
+    policy_fn = make_belief_puct_policy_fn(pv_apply, pv_params,
+                                           hc_apply, hc_params, **kwargs)
+
+    def action_fn(state: GameState, traj: PublicTrajectory,
+                  key: Array) -> Array:
+        action, _ = policy_fn(state, traj, key)
+        return action
 
     return action_fn
 
@@ -283,6 +312,121 @@ def make_belief_fair_raw_action_fn(pv_apply, pv_params, hc_apply, hc_params,
         return jax.random.categorical(k_sample, logits).astype(jnp.int32)
 
     return action_fn
+
+
+# ── Belief-weighted collection (gen-12) ───────────────────────────────────────
+#
+# The standing collector (jass_puct.make_puct_collect_fn) samples its K
+# search worlds uniformly — a q≈0 teacher. The belief collector threads
+# each game's PublicTrajectory through the self-play scan so every seat's
+# search runs on belief-drawn worlds instead (the operator that converted
+# q into +4.1/game at the 2026-07-17 gate). Everything else about the
+# emitted data is the standard PV contract: features are the TRUE
+# self-play states (collection is perfect-info by design — plan
+# 2026-07-05; the belief changes only which worlds the trees search),
+# value labels the acting player's terminal differential, pi the
+# aggregated root visits over the belief-drawn trees.
+
+
+def _play_one_pv_traj(policy_fn, key: Array):
+    """One game with a trajectory-threaded policy_fn; PV recording.
+
+    jass_selfplay._play_one_pv with the PublicTrajectory carry of
+    _play_score_traj: the record is written AFTER the move is chosen, so
+    the filter never sees the mover's pending decision.
+    """
+    init_key, play_key = jax.random.split(key)
+    s0 = _game.init(init_key)
+    traj0 = empty_trajectory(s0)
+
+    def step_fn(carry, t):
+        s, traj, k = carry
+        done = s.trick_num >= 9
+
+        k, sk = jax.random.split(k)
+        action, pi = policy_fn(s, traj, sk)
+
+        cm, hd = value_features(s, s.current_player)
+        legal = _game.legal_action_mask(s)
+        out = (cm, hd, pi, legal, s.current_player, ~done)
+
+        traj = record_step(traj, t, s, action, valid=~done)
+        ns = _game.step(s, action)
+        ns = jax.tree_util.tree_map(
+            lambda a, b: jnp.where(done, a, b), s, ns)
+        return (ns, traj, k), out
+
+    (final, _, _), (cm, hd, pi, legal, actor, alive) = jax.lax.scan(
+        step_fn, (s0, traj0, play_key), jnp.arange(_MAX_STEPS))
+    rew = _game.rewards(final)  # (4,)
+    return cm, hd, pi, legal, actor, alive, rew
+
+
+def _collect_pv_traj(policy_fn, key: Array, batch_size: int):
+    """batch_size games with a trajectory-threaded policy_fn; PV labels."""
+    keys = jax.random.split(key, batch_size)
+    cm, hd, pi, legal, actor, alive, rew = jax.vmap(
+        functools.partial(_play_one_pv_traj, policy_fn)
+    )(keys)
+    labels = jnp.take_along_axis(
+        rew[:, jnp.newaxis, :],   # (B, 1, 4)
+        actor[..., jnp.newaxis],  # (B, T, 1)
+        axis=-1,
+    ).squeeze(-1)                 # (B, T)
+    return cm, hd, labels, pi, legal, alive
+
+
+def make_belief_puct_collect_fn(
+    pv_apply,
+    pv_params,
+    hc_apply,
+    hc_params,
+    *,
+    num_particles: int = 32,
+    mix_uniform: float = 0.0,
+    num_determinizations: int = 16,
+    num_simulations: int = 64,
+    v_scale: float = 100.0,
+    search_variant: str = "muzero",
+    pb_c_init: float = 1.25,
+    dirichlet_fraction: float = 0.0,
+    readout: str = "visits",
+    temperature: float = 1.0,
+):
+    """collect_fn(key, batch_size) for belief-weighted PUCT self-play.
+
+    The gen-12 generator: jass_puct.make_puct_collect_fn with every
+    seat's K root determinizations drawn ∝ belief weights (defaults =
+    the promoted play config, N=32 λ=0 on the standing muzero recipe
+    K=16×64 / pb_c 1.25 / dirichlet 0 / τ=1.0). Same PV contract —
+    (cm, hd, labels, pi, legal, alive) — so train_pv_model and the
+    per-shard corpus tooling work unchanged.
+
+    Cost per decision adds the filter's N × 38 hc evals to the search
+    (same order as one K=16×64 search — SOP integration section);
+    re-run profile_collect_fn before a production collection.
+    """
+
+    @functools.partial(jax.jit, static_argnames=("batch_size",))
+    def _belief_collect(pv_p, hc_p, key: Array, batch_size: int):
+        policy_fn = make_belief_puct_policy_fn(
+            pv_apply, pv_p, hc_apply, hc_p,
+            num_particles=num_particles,
+            mix_uniform=mix_uniform,
+            num_determinizations=num_determinizations,
+            num_simulations=num_simulations,
+            v_scale=v_scale,
+            search_variant=search_variant,
+            pb_c_init=pb_c_init,
+            dirichlet_fraction=dirichlet_fraction,
+            readout=readout,
+            temperature=temperature)
+        return _collect_pv_traj(policy_fn, key, batch_size)
+
+    def collect_fn(key: Array, batch_size: int):
+        return _belief_collect(pv_params, hc_params, key, batch_size)
+
+    return collect_fn
 
 
 def as_traj_action_fn(action_fn):

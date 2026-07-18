@@ -35,6 +35,10 @@ Flatten and filter by alive before feeding the trainer, or pass
 alive.reshape(-1).astype(jnp.float32) as a sample-weight mask to avoid
 dynamic shapes inside jit.
 
+jass_belief.make_belief_puct_collect_fn (gen-12) emits the same
+(cm, hd, labels, pi, legal, alive) contract with the K search worlds
+drawn ∝ particle-filter belief instead of uniformly.
+
 Hands-conditional generators (sop gen-11; jass_puct.make_puct_hc_collect_fn)
 emit 1+W training rows per step — the true-state row plus W per-world rows
 pairing each determinization's features with THAT tree's visit

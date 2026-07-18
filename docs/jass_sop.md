@@ -235,9 +235,11 @@ and public fields only, all observable from outside.
   forehand must come from the FIRST RECORDED MOVE (the session's
   seating list rotates between games — the desync the first launch
   hit, fixed in `rtmtvklk`); and JTR occasionally (~1/40 games)
-  plays a random fallback card when `getCardsPossibleToPlay` and
-  `Mode.canPlayCard` disagree — pre-existing, both arms, ignorable
-  at this rate but visible as ERROR lines in the logs.
+  played a random fallback card when `getCardsPossibleToPlay` and
+  `Mode.canPlayCard` disagreed — pre-existing undertrump gap in
+  `TrumpfColorMode.validCardsBits`'s void-in-led-suit path, both
+  arms of the 2026-07-18 runs (ignorable at that rate), FIXED in
+  JTR-2 `zsqvnlzk` (2026-07-18) — reruns from master won't show it.
 
 **Decision → plan NEXT (2026-07-17); priced by the probe (q̄ 0.56
 ceiling, log 2026-07-17) and the dose-response law (12.6·q, log
